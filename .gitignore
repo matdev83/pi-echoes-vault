@@ -1,0 +1,8 @@
+node_modules/
+.pi/
+EchoesVault/
+*.tmp
+dist/
+.DS_Store
+*.log
+.pi-subagents/

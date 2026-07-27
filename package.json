@@ -1,0 +1,47 @@
+{
+  "name": "pi-echoes-vault",
+  "version": "0.1.0",
+  "description": "EchoesVault — persistent memory package for the Earendil Works Pi coding agent (@earendil-works/pi-coding-agent). Obsidian-style knowledge base with daily logs, encyclopedia pages, and session resumption.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "earendil-works",
+    "echoes-vault",
+    "memory",
+    "obsidian"
+  ],
+  "files": [
+    "extensions",
+    "src",
+    "skills",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/vault.test.ts",
+    "smoke": "node --experimental-strip-types scripts/smoke.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check": "npm run typecheck && npm test && npm run smoke"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/echoes-vault.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.82.1",
+    "@types/node": "^22.15.0",
+    "typebox": "^1.1.38",
+    "typescript": "^5.8.3"
+  }
+}
