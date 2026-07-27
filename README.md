@@ -69,7 +69,7 @@ Local checkout path also works: `pi install /absolute/path/to/pi-echoes-vault`.
 
 ### Update / remove
 
-Unpinned installs (no `@ref`) track the repository default / upstream branch tip. `pi update`, `pi update --extensions`, or `pi update --all` fetches and advances that clone.
+Unpinned installs (no `@ref`) track the repository default / upstream branch tip. `pi update --extensions`, `pi update --all`, or the exact package source fetches and advances that clone.
 
 Pinned installs (`@vX.Y.Z` or a commit) stay on that ref: package updates reconcile the clone to the configured ref and do **not** move you to a newer tag. To change pins, reinstall with the new ref, for example:
 
