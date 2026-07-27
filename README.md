@@ -76,20 +76,21 @@ Peer runtime modules (`@earendil-works/pi-coding-agent`, `typebox`) are provided
 
 Tagged releases (`v*`, matching `package.json` `version`) publish to npm from GitHub Actions using [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC) with provenance attestations — no long-lived npm token in the repo. Each tag also creates a GitHub Release with the npm tarball and `SHA256SUMS`.
 
-### One-time npmjs.com setup (repository owner)
+### One-time npmjs.com bootstrap (repository owner)
 
-Workflow code cannot configure your npm account. Before the first `v*` tag publish:
+A brand-new npm package name generally **cannot** be published by the OIDC trusted-publishing workflow until the package already exists and has Trusted Publisher settings. That first establishment is a **manual, authenticated** step on npmjs.com (for example an interactive `npm publish` while logged in, or creating/claiming the package in the npm web UI). The GitHub Actions OIDC release cannot replace that bootstrap: there is nothing yet to attach the trusted publisher to.
 
-1. Create / claim the public package name `pi-echoes-vault` on [npmjs.com](https://www.npmjs.com/) (or open the existing package settings).
-2. Under **Trusted Publisher** → **GitHub Actions**, add:
+After the package exists on npmjs.com:
+
+1. Open the package settings for `pi-echoes-vault` on [npmjs.com](https://www.npmjs.com/).
+2. Under **Trusted Publisher** → **GitHub Actions**, configure exactly:
    - **Organization or user**: `matdev83`
    - **Repository**: `pi-echoes-vault`
    - **Workflow filename**: `release.yml` (exact match, including `.yml`)
    - **Environment**: leave empty (this repo’s release workflow does not use a GitHub Environment)
-   - Allow **npm publish**
-3. Ensure the publishing GitHub Actions workflow can mint an OIDC token (`id-token: write` is already set in `.github/workflows/release.yml`).
+3. Confirm the workflow can mint an OIDC token (`id-token: write` is already set in `.github/workflows/release.yml`).
 
-Do not push a release tag until that trusted publisher entry is saved; the first publish will fail with an auth error otherwise.
+Only after those settings are saved should you push `v*` tags for automated publish. Subsequent releases are fully remote (OIDC + provenance). Do not store long-lived npm tokens in this repository.
 
 ## Usage
 

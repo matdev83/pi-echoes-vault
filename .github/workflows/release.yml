@@ -24,8 +24,33 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          # Floor for trusted publishing is Node >=22.14; pin a current 22.x that also
+          # satisfies this package / Earendil peer engines (>=22.19).
+          node-version: "22.19"
           registry-url: https://registry.npmjs.org
+
+      - name: Install npm CLI for trusted publishing
+        run: |
+          set -eu
+          echo "Node before npm upgrade: $(node -v)"
+          echo "npm before upgrade: $(npm -v)"
+          npm install -g 'npm@^11.5.1'
+          echo "Node after npm upgrade: $(node -v)"
+          echo "npm after upgrade: $(npm -v)"
+          # Fail early if the installed CLI is older than the trusted-publishing floor.
+          node <<'NODE'
+          const v = require("child_process").execSync("npm -v", { encoding: "utf8" }).trim();
+          const [maj, min, pat] = v.split(".").map(Number);
+          if (
+            maj < 11 ||
+            (maj === 11 && min < 5) ||
+            (maj === 11 && min === 5 && pat < 1)
+          ) {
+            console.error(`npm >=11.5.1 required for trusted publishing; got ${v}`);
+            process.exit(1);
+          }
+          console.log(`Trusted-publishing npm CLI OK: ${v}`);
+          NODE
 
       - name: Install dependencies
         run: npm ci
@@ -54,18 +79,45 @@ jobs:
           sha256sum "$TARBALL" > SHA256SUMS
           cat SHA256SUMS
 
-      - name: Publish to npm
-        run: npm publish --access public --provenance
+      - name: Publish to npm (skip if this version already exists)
+        run: |
+          set -eu
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          VERSION="$(node -p "require('./package.json').version")"
+          SPEC="${PACKAGE_NAME}@${VERSION}"
 
-      - name: Create GitHub Release
+          set +e
+          VIEW_OUT="$(npm view "${SPEC}" version 2>&1)"
+          VIEW_CODE=$?
+          set -e
+
+          if [ "$VIEW_CODE" -eq 0 ]; then
+            echo "Registry already has ${SPEC} (${VIEW_OUT}); skipping npm publish and continuing to GitHub Release."
+          elif echo "$VIEW_OUT" | grep -qiE 'E404|404 Not Found|NPM_CONFIG_NOT_FOUND|not in this registry|is not in this registry'; then
+            echo "Registry does not have ${SPEC}; publishing with provenance..."
+            npm publish --access public --provenance
+          else
+            echo "Registry lookup for ${SPEC} failed (exit ${VIEW_CODE}); refusing to skip publish."
+            echo "$VIEW_OUT"
+            exit 1
+          fi
+
+      - name: Create or update GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
           VERSION="$(node -p "require('./package.json').version")"
           TARBALL="pi-echoes-vault-${VERSION}.tgz"
-          gh release create "$GITHUB_REF_NAME" \
-            --generate-notes \
-            --title "v${VERSION}" \
-            "$TARBALL" \
-            SHA256SUMS
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "GitHub Release ${GITHUB_REF_NAME} already exists; uploading assets with --clobber."
+            gh release upload "$GITHUB_REF_NAME" "$TARBALL" SHA256SUMS --clobber
+          else
+            echo "Creating GitHub Release ${GITHUB_REF_NAME}."
+            gh release create "$GITHUB_REF_NAME" \
+              --generate-notes \
+              --title "v${VERSION}" \
+              "$TARBALL" \
+              SHA256SUMS
+          fi
