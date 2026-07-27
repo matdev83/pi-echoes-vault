@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check
+        run: npm run check
+
+      - name: Validate tag matches package.json version
+        run: |
+          set -eu
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "Tag '${GITHUB_REF_NAME}' does not match package.json version '${VERSION}'"
+            exit 1
+          fi
+
+      - name: Pack
+        run: npm pack
+
+      - name: Create SHA256SUMS
+        run: |
+          set -eu
+          VERSION="$(node -p "require('./package.json').version")"
+          TARBALL="pi-echoes-vault-${VERSION}.tgz"
+          sha256sum "$TARBALL" > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish to npm
+        run: npm publish --access public --provenance
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          VERSION="$(node -p "require('./package.json').version")"
+          TARBALL="pi-echoes-vault-${VERSION}.tgz"
+          gh release create "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --title "v${VERSION}" \
+            "$TARBALL" \
+            SHA256SUMS

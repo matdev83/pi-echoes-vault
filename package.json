@@ -4,6 +4,21 @@
   "description": "EchoesVault — persistent memory package for the Earendil Works Pi coding agent (@earendil-works/pi-coding-agent). Obsidian-style knowledge base with daily logs, encyclopedia pages, and session resumption.",
   "type": "module",
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/matdev83/pi-echoes-vault.git"
+  },
+  "homepage": "https://github.com/matdev83/pi-echoes-vault#readme",
+  "bugs": {
+    "url": "https://github.com/matdev83/pi-echoes-vault/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "keywords": [
     "pi-package",
     "pi-extension",

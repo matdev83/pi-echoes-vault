@@ -24,23 +24,72 @@ If you run upstream Mario Zechner Pi (or another fork) instead:
 
 Domain logic under `src/vault.ts` is harness-agnostic and usually needs no changes.
 
+## Requirements
+
+- **Node.js** `>=22` (matches this package’s `engines` field)
+- **Earendil Works Pi** (`@earendil-works/pi-coding-agent`) on your PATH — this package targets that harness’s extension API (see [Pi distribution target](#pi-distribution-target))
+
 ## Install
 
 From a trusted project directory (with Earendil Works `pi` on your PATH):
 
 ```bash
-pi install /absolute/path/to/pi-echoesvault
-# or, once published:
-# pi install npm:pi-echoes-vault
+pi install npm:pi-echoes-vault
 ```
 
-Use `-l` for project-local settings (`.pi/settings.json`). For a one-off trial without installing:
+Use `-l` to install into project-local settings (`.pi/settings.json`) instead of user settings:
 
 ```bash
+pi install -l npm:pi-echoes-vault
+```
+
+Other sources (secondary):
+
+```bash
+# GitHub at a tag / ref
+pi install git:github.com/matdev83/pi-echoes-vault@v0.1.0
+
+# Local checkout
+pi install /absolute/path/to/pi-echoes-vault
+```
+
+One-off trial without writing settings:
+
+```bash
+pi -e npm:pi-echoes-vault
+# or from a checkout:
 pi -e ./extensions/echoes-vault.ts
 ```
 
+### Update / remove
+
+```bash
+pi update npm:pi-echoes-vault          # update this package
+pi update --extensions                 # update installed packages
+pi remove npm:pi-echoes-vault          # uninstall (add -l for project settings)
+pi list                                # show installed packages
+```
+
 Peer runtime modules (`@earendil-works/pi-coding-agent`, `typebox`) are provided by Pi; you do not need a separate app install for those when running inside Pi.
+
+## Release & provenance
+
+Tagged releases (`v*`, matching `package.json` `version`) publish to npm from GitHub Actions using [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC) with provenance attestations — no long-lived npm token in the repo. Each tag also creates a GitHub Release with the npm tarball and `SHA256SUMS`.
+
+### One-time npmjs.com setup (repository owner)
+
+Workflow code cannot configure your npm account. Before the first `v*` tag publish:
+
+1. Create / claim the public package name `pi-echoes-vault` on [npmjs.com](https://www.npmjs.com/) (or open the existing package settings).
+2. Under **Trusted Publisher** → **GitHub Actions**, add:
+   - **Organization or user**: `matdev83`
+   - **Repository**: `pi-echoes-vault`
+   - **Workflow filename**: `release.yml` (exact match, including `.yml`)
+   - **Environment**: leave empty (this repo’s release workflow does not use a GitHub Environment)
+   - Allow **npm publish**
+3. Ensure the publishing GitHub Actions workflow can mint an OIDC token (`id-token: write` is already set in `.github/workflows/release.yml`).
+
+Do not push a release tag until that trusted publisher entry is saved; the first publish will fail with an auth error otherwise.
 
 ## Usage
 
