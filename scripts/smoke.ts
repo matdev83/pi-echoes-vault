@@ -123,9 +123,10 @@ async function loadExtension() {
 	assert.ok(pkg.pi?.skills?.length, "package.json pi.skills required");
 	assert.ok(
 		pkg.peerDependencies?.["@earendil-works/pi-coding-agent"],
-		"peer must target Earendil Works Pi",
+		"peer must target @earendil-works/pi-coding-agent",
 	);
-	assert.match(pkg.description ?? "", /Earendil Works/i);
+	assert.match(pkg.description ?? "", /persistent agent memory/i);
+	assert.match(pkg.description ?? "", /@earendil-works\/pi-coding-agent/);
 
 	const extPath = path.join(root, pkg.pi!.extensions![0]!);
 	const mod = await import(pathToFileURL(extPath).href);

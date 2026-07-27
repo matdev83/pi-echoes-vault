@@ -1,7 +1,7 @@
 {
   "name": "pi-echoes-vault",
   "version": "0.1.0",
-  "description": "EchoesVault — persistent memory package for the Earendil Works Pi coding agent (@earendil-works/pi-coding-agent). Obsidian-style knowledge base with daily logs, encyclopedia pages, and session resumption.",
+  "description": "EchoesVault for Pi Agent Harness — persistent agent memory: Markdown/Obsidian-compatible knowledge base, daily logs, architecture/ADR pages, session continuity, and OKF-inspired page conventions. Peer: @earendil-works/pi-coding-agent.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -16,13 +16,17 @@
     "url": "https://github.com/matdev83/pi-echoes-vault/issues"
   },
   "keywords": [
-    "pi-package",
+    "pi-agent",
     "pi-extension",
-    "pi-coding-agent",
-    "earendil-works",
+    "agent-memory",
+    "persistent-memory",
+    "knowledge-base",
+    "markdown",
+    "obsidian",
+    "okf",
+    "developer-tools",
     "echoes-vault",
-    "memory",
-    "obsidian"
+    "pi-coding-agent"
   ],
   "files": [
     "extensions",

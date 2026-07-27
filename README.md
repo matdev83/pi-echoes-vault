@@ -1,17 +1,19 @@
-# EchoesVault for Pi (Earendil Works)
+# EchoesVault for Pi Agent Harness
 
-Persistent, file-based project memory for the **Earendil Works Pi coding agent** (`@earendil-works/pi-coding-agent`). Obsidian-style Markdown vault with daily logs, encyclopedia pages, and session restore — without a custom GUI.
+Persistent agent memory for the Pi coding-agent harness: a Markdown/Obsidian-compatible knowledge base with daily logs, architecture/ADR pages, and session continuity — without a custom GUI.
+
+Vault pages use YAML frontmatter and typed Markdown conventions inspired by Google’s [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf). This port follows those practical patterns (frontmatter, encyclopedia pages, index registry); it does **not** ship a formal OKF schema validator or claim certified compliance.
 
 This package is a **Pi harness port** of [`echoes-vault-opencode`](https://github.com/psinetron/echoes-vault-opencode) (MIT). Domain behavior is preserved; OpenCode-specific plugin/TUI pieces are replaced with a Pi extension, tools, commands, and skills.
 
 ## Pi distribution target
 
-This port is built and typed against the **Earendil Works** Pi distribution and its package API:
+Built and typed against the `@earendil-works/pi-coding-agent` package API (compatibility requirement):
 
 - Peer / import: `@earendil-works/pi-coding-agent`
 - Extension surface used here: `ExtensionAPI`, `registerTool`, `registerCommand`, `sendUserMessage` (including `deliverAs: "followUp"`), and session lifecycle events (`session_start`, `session_before_switch`, `session_before_fork`, `session_shutdown`)
 
-That choice is deliberate for environments that ship Earendil Works Pi. It is **not** a drop-in peer rename of upstream [`@mariozechner/pi-coding-agent`](https://github.com/badlogic/pi-mono).
+That peer is deliberate for environments that ship this Pi distribution. It is **not** a drop-in peer rename of upstream [`@mariozechner/pi-coding-agent`](https://github.com/badlogic/pi-mono).
 
 ### Adapting for other Pi distributions
 
@@ -27,11 +29,11 @@ Domain logic under `src/vault.ts` is harness-agnostic and usually needs no chang
 ## Requirements
 
 - **Node.js** `>=22` (matches this package’s `engines` field)
-- **Earendil Works Pi** (`@earendil-works/pi-coding-agent`) on your PATH — this package targets that harness’s extension API (see [Pi distribution target](#pi-distribution-target))
+- Pi coding agent with the `@earendil-works/pi-coding-agent` extension API on your PATH (see [Pi distribution target](#pi-distribution-target))
 
 ## Install
 
-Canonical install is from this GitHub repository (Earendil Works `pi` on your PATH), in a trusted project directory:
+Canonical install is from this GitHub repository (`pi` on your PATH), in a trusted project directory:
 
 ```bash
 pi install https://github.com/matdev83/pi-echoes-vault
