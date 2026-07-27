@@ -31,66 +31,66 @@ Domain logic under `src/vault.ts` is harness-agnostic and usually needs no chang
 
 ## Install
 
-From a trusted project directory (with Earendil Works `pi` on your PATH):
+Canonical install is from this GitHub repository (Earendil Works `pi` on your PATH), in a trusted project directory:
 
 ```bash
-pi install npm:pi-echoes-vault
+pi install https://github.com/matdev83/pi-echoes-vault
+```
+
+Equivalent git shorthand (same unpinned source):
+
+```bash
+pi install git:github.com/matdev83/pi-echoes-vault
 ```
 
 Use `-l` to install into project-local settings (`.pi/settings.json`) instead of user settings:
 
 ```bash
-pi install -l npm:pi-echoes-vault
+pi install -l https://github.com/matdev83/pi-echoes-vault
+# or: pi install -l git:github.com/matdev83/pi-echoes-vault
 ```
 
-Other sources (secondary):
+Pin a stable release tag (recommended for shared/team settings):
 
 ```bash
-# GitHub at a tag / ref
-pi install git:github.com/matdev83/pi-echoes-vault@v0.1.0
-
-# Local checkout
-pi install /absolute/path/to/pi-echoes-vault
+pi install git:github.com/matdev83/pi-echoes-vault@vX.Y.Z
 ```
 
-One-off trial without writing settings:
+One-session trial without writing settings (`-e` / `--extension`):
 
 ```bash
-pi -e npm:pi-echoes-vault
+pi -e https://github.com/matdev83/pi-echoes-vault
+# or: pi -e git:github.com/matdev83/pi-echoes-vault
 # or from a checkout:
 pi -e ./extensions/echoes-vault.ts
 ```
 
+Local checkout path also works: `pi install /absolute/path/to/pi-echoes-vault`.
+
 ### Update / remove
 
+Unpinned installs (no `@ref`) track the repository default / upstream branch tip. `pi update`, `pi update --extensions`, or `pi update --all` fetches and advances that clone.
+
+Pinned installs (`@vX.Y.Z` or a commit) stay on that ref: package updates reconcile the clone to the configured ref and do **not** move you to a newer tag. To change pins, reinstall with the new ref, for example:
+
 ```bash
-pi update npm:pi-echoes-vault          # update this package
-pi update --extensions                 # update installed packages
-pi remove npm:pi-echoes-vault          # uninstall (add -l for project settings)
-pi list                                # show installed packages
+pi install git:github.com/matdev83/pi-echoes-vault@vX.Y.Z
+```
+
+```bash
+pi update --extensions                 # update packages; reconcile pinned git refs
+pi update git:github.com/matdev83/pi-echoes-vault
+pi remove git:github.com/matdev83/pi-echoes-vault   # add -l for project settings
+pi list                                             # show installed packages
 ```
 
 Peer runtime modules (`@earendil-works/pi-coding-agent`, `typebox`) are provided by Pi; you do not need a separate app install for those when running inside Pi.
 
-## Release & provenance
+## Release artifacts
 
-Tagged releases (`v*`, matching `package.json` `version`) publish to npm from GitHub Actions using [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC) with provenance attestations — no long-lived npm token in the repo. Each tag also creates a GitHub Release with the npm tarball and `SHA256SUMS`.
+Pushing a `v*` tag that matches `package.json` `version` runs `.github/workflows/release.yml`, which creates or updates a **GitHub Release** with an `npm pack` tarball and `SHA256SUMS`. Those assets are for **audit and offline verification** only.
 
-### One-time npmjs.com bootstrap (repository owner)
-
-A brand-new npm package name generally **cannot** be published by the OIDC trusted-publishing workflow until the package already exists and has Trusted Publisher settings. That first establishment is a **manual, authenticated** step on npmjs.com (for example an interactive `npm publish` while logged in, or creating/claiming the package in the npm web UI). The GitHub Actions OIDC release cannot replace that bootstrap: there is nothing yet to attach the trusted publisher to.
-
-After the package exists on npmjs.com:
-
-1. Open the package settings for `pi-echoes-vault` on [npmjs.com](https://www.npmjs.com/).
-2. Under **Trusted Publisher** → **GitHub Actions**, configure exactly:
-   - **Organization or user**: `matdev83`
-   - **Repository**: `pi-echoes-vault`
-   - **Workflow filename**: `release.yml` (exact match, including `.yml`)
-   - **Environment**: leave empty (this repo’s release workflow does not use a GitHub Environment)
-3. Confirm the workflow can mint an OIDC token (`id-token: write` is already set in `.github/workflows/release.yml`).
-
-Only after those settings are saved should you push `v*` tags for automated publish. Subsequent releases are fully remote (OIDC + provenance). Do not store long-lived npm tokens in this repository.
+**Pi installs the git repository / tag** (`https://github.com/...` or `git:github.com/...@vX.Y.Z`), not the Release tarball and not workflow run artifacts. Do not treat Actions artifacts as an install source.
 
 ## Usage
 

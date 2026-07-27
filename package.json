@@ -15,10 +15,6 @@
   "bugs": {
     "url": "https://github.com/matdev83/pi-echoes-vault/issues"
   },
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
   "keywords": [
     "pi-package",
     "pi-extension",
