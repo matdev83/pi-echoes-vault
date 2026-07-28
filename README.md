@@ -109,7 +109,7 @@ When the extension is loaded **and** a real vault already exists (`EchoesVault/`
 
 | Event | Behavior |
 |-------|----------|
-| `session_start` (`startup` / `new` / `resume` / `fork`) | Runs the same restoration workflow as `/echoes-start` once per extension runtime |
+| `session_start` (`startup` / `new` / `resume` / `fork`) | Starts lifecycle tracking silently. Pending recovery may launch in an isolated SDK session; interactive restoration requires `/echoes-start`. |
 | `session_start` (`reload`) | Refreshes stats only — does **not** re-inject start context |
 | `session_before_switch` / `session_before_fork` | If the session is started and not yet saved, queues the existing `/echoes-end` prompt once and **cancels** the switch/fork so the model can commit. Retry after a successful commit (or after a failed end turn settles — see below). |
 | `agent_settled` | If an end prompt was queued and the agent turn finished **without** `commit_memory_to_echoes_vault`, clears the in-flight end flag so a later switch or `/echoes-end` can retry. Does **not** auto-loop the end prompt. |
@@ -118,7 +118,7 @@ When the extension is loaded **and** a real vault already exists (`EchoesVault/`
 
 Successful `commit_memory_to_echoes_vault` is the authoritative “already saved” signal: it clears `endPending`, marks `saved`, and suppresses automatic end prompts.
 
-Start dedupe is **runtime-local** (per extension instance / cwd). A process restart or Pi session replacement (`/new`, `/resume`, `/fork`) binds a fresh instance, so ordinary context restoration runs again even if persisted `startPromptSent` was left true. Interrupted-session recovery is narrower: only Pi launched in the same project folder may claim `endPending`. Recovery runs in a separate in-memory Pi SDK session with extension/context discovery disabled and only the EchoesVault commit tool enabled, so its transcript and instructions never enter the new interactive context. A persisted 30-minute lease prevents duplicate workers; failures release the claim for retry, while a successful commit clears `endPending` and the transcript reference.
+Automatic session starts never inject EchoesVault messages or trigger an interactive model turn. Use `/echoes-start` when explicit interactive context restoration is wanted; manual restoration is deduplicated within the current extension runtime. Interrupted-session recovery is narrower: only Pi launched in the same project folder may claim `endPending`. Recovery runs in a separate in-memory Pi SDK session with extension/context discovery disabled and only the EchoesVault commit tool enabled, so its transcript and instructions never enter the new interactive context. A persisted 30-minute lease prevents duplicate workers; failures release the claim for retry, while a successful commit clears `endPending` and the transcript reference.
 
 State read-modify-write for lifecycle and commit is serialized **in-process** per cwd (no cross-process lock).
 

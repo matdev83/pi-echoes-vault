@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-export const PACKAGE_VERSION = "0.2.0";
+export const PACKAGE_VERSION = "0.2.1";
 /** Persisted `.pi/echoes-state.json` schema version (v3 adds isolated recovery metadata). */
 export const STATE_VERSION = 3;
 export const STATE_RELATIVE = path.join(".pi", "echoes-state.json");

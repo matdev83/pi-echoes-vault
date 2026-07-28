@@ -226,15 +226,9 @@ async function main() {
 			{ type: "session_start", reason: "startup" },
 			lifecycle,
 		);
-		assert.ok(
-			mock.messages.some(
-				(m) =>
-					m.content.includes("Context Restoration") &&
-					m.content.includes("automatic Pi session-start"),
-			),
-		);
+		assert.equal(mock.messages.length, 0, "automatic startup must not inject agent context");
 		assert.equal((await readState(lifecycle)).session.started, true);
-		assert.equal((await readState(lifecycle)).session.startPromptSent, true);
+		assert.equal((await readState(lifecycle)).session.startPromptSent, false);
 
 		// Reload must not re-send start
 		mock.messages.length = 0;
@@ -301,42 +295,22 @@ async function main() {
 		assert.equal(afterSave[0], undefined);
 		assert.equal(mock.messages.length, 0);
 
-		// Same extension instance: startup → commit → logical new/resume/fork
-		// must restore again (runtime start dedupe resets per logical session).
+		// Automatic logical starts remain silent; explicit /echoes-start restores once.
 		const sameInst = await mkdtemp(path.join(tmpdir(), "echoes-sameinst-"));
 		dirsToClean.push(sameInst);
 		await activateVault(sameInst);
-		mock.messages.length = 0;
-		await mock.emit("session_start", { type: "session_start", reason: "startup" }, sameInst);
-		assert.ok(
-			mock.messages.some((m) => m.content.includes("Context Restoration")),
-			"same-instance initial startup must restore",
-		);
-		assert.equal((await readState(sameInst)).session.started, true);
-
-		for (const reason of ["new", "resume", "fork"] as const) {
-			await commitMemory(sameInst, { dailySummary: `Before same-instance ${reason}.` });
-			assert.equal((await readState(sameInst)).session.saved, true);
+		for (const reason of ["startup", "new", "resume", "fork"] as const) {
+			if (reason !== "startup") await commitMemory(sameInst, { dailySummary: `Before ${reason}.` });
 			mock.messages.length = 0;
-			mock.notifies.length = 0;
 			await mock.emit("session_start", { type: "session_start", reason }, sameInst);
-			assert.ok(
-				mock.messages.some((m) => m.content.includes("Context Restoration")),
-				`same-instance session_start/${reason} after commit must restore`,
-			);
-			const afterLogical = await readState(sameInst);
-			assert.equal(afterLogical.session.started, true, `started after same-instance ${reason}`);
-			assert.equal(afterLogical.session.saved, false, `saved cleared after same-instance ${reason}`);
-
-			// Same-session duplicate still suppressed
-			mock.messages.length = 0;
-			await mock.commands.get("echoes-start")!.handler("", mock.makeCtx(sameInst));
-			assert.equal(
-				mock.messages.length,
-				0,
-				`same-session /echoes-start after auto ${reason} must be suppressed`,
-			);
+			assert.equal(mock.messages.length, 0, `automatic session_start/${reason} must be silent`);
+			assert.equal((await readState(sameInst)).session.started, true);
 		}
+		await mock.commands.get("echoes-start")!.handler("", mock.makeCtx(sameInst));
+		assert.ok(mock.messages.some((m) => m.content.includes("Context Restoration")));
+		mock.messages.length = 0;
+		await mock.commands.get("echoes-start")!.handler("", mock.makeCtx(sameInst));
+		assert.equal(mock.messages.length, 0, "manual restoration remains deduped");
 
 		// Reload still excluded (no second start) after a prior restore on this instance
 		mock.messages.length = 0;
@@ -368,21 +342,17 @@ async function main() {
 		assert.ok(mockFollow.notifies.some((n) => /did not commit/i.test(n)));
 		assert.equal(mockFollow.messages.filter((m) => m.content.includes("Session Distillation")).length, 1);
 
-		// --- new/resume/fork after prior start/save WITHOUT manually resetting flags ---
-		// Simulate process restart / new extension instance with persisted startPromptSent=true
+		// --- new/resume/fork after prior start/save remain silent ---
 		const afterCommit = await readState(lifecycle);
 		assert.equal(afterCommit.session.saved, true);
-		assert.equal(afterCommit.session.startPromptSent, true);
+		assert.equal(afterCommit.session.startPromptSent, false);
 
 		const mock2 = createMockPi();
 		mod.default(mock2.api);
 		mock2.setIdle(true);
 		mock2.messages.length = 0;
 		await mock2.emit("session_start", { type: "session_start", reason: "new" }, lifecycle);
-		assert.ok(
-			mock2.messages.some((m) => m.content.includes("Context Restoration")),
-			"new session after save must restore without manual flag reset",
-		);
+		assert.equal(mock2.messages.length, 0, "automatic new session must be silent");
 		assert.equal((await readState(lifecycle)).session.started, true);
 		assert.equal((await readState(lifecycle)).session.saved, false);
 
@@ -395,20 +365,14 @@ async function main() {
 			{ type: "session_start", reason: "resume" },
 			lifecycle,
 		);
-		assert.ok(
-			mockResume.messages.some((m) => m.content.includes("Context Restoration")),
-			"resume after save must restore",
-		);
+		assert.equal(mockResume.messages.length, 0, "automatic resume must be silent");
 
 		await commitMemory(lifecycle, { dailySummary: "After resume." });
 		const mockFork = createMockPi();
 		mod.default(mockFork.api);
 		mockFork.messages.length = 0;
 		await mockFork.emit("session_start", { type: "session_start", reason: "fork" }, lifecycle);
-		assert.ok(
-			mockFork.messages.some((m) => m.content.includes("Context Restoration")),
-			"fork after save must restore",
-		);
+		assert.equal(mockFork.messages.length, 0, "automatic fork must be silent");
 
 		// Process-like restart with persisted startPromptSent + endPending
 		await startSession(lifecycle);
@@ -427,10 +391,7 @@ async function main() {
 			{ type: "session_start", reason: "startup" },
 			lifecycle,
 		);
-		assert.ok(
-			mockCrossProject.messages.some((m) => m.content.includes("Context Restoration")),
-			"restart must not be blocked by persisted startPromptSent",
-		);
+		assert.equal(mockCrossProject.messages.length, 0, "cross-project startup must be silent");
 		assert.ok(
 			mockCrossProject.notifies.every((m) => !m.includes("isolated background session")),
 			"recovery must not start from another launch folder",

@@ -516,8 +516,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (!AUTO_START_REASONS.has(event.reason)) return;
 
-			// Logical new/resume/fork/startup may reuse this extension instance.
-			// Reset runtime-local start dedupe so restoration can run again.
+			// Automatic starts are lifecycle-only. Interactive restoration is explicit via /echoes-start.
 			startDeliveredThisRuntime.delete(cwdKey(ctx.cwd));
 			if (cwdKey(ctx.cwd) === launchCwd) {
 				const recovery = await startBackgroundRecovery(ctx.cwd);
@@ -525,7 +524,7 @@ export default function (pi: ExtensionAPI) {
 					notify(ctx, "EchoesVault recovery started in an isolated background session", "info");
 				}
 			}
-			await runEchoesStart(ctx, "automatic");
+			await startSession(ctx.cwd);
 		} catch {
 			/* non-fatal */
 		}
