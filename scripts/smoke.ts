@@ -393,7 +393,7 @@ async function main() {
 		);
 		assert.equal(mockCrossProject.messages.length, 0, "cross-project startup must be silent");
 		assert.ok(
-			mockCrossProject.notifies.every((m) => !m.includes("isolated background session")),
+			mockCrossProject.notifies.every((m) => !m.includes("Started EchoesVault updates")),
 			"recovery must not start from another launch folder",
 		);
 		assert.equal((await readState(lifecycle)).session.endPending, true);
@@ -412,8 +412,10 @@ async function main() {
 			lifecycle,
 		);
 		assert.ok(
-			mockRestart.notifies.some((m) => m.includes("isolated background session")),
-			"same-folder pending recovery must start outside the interactive context",
+			mockRestart.notifies.some(
+				(m) => m === `Started EchoesVault updates for "${lifecycle}" in the background.`,
+			),
+			"same-folder pending recovery notification must identify the project",
 		);
 		assert.ok(
 			mockRestart.messages.every((m) => !m.content.includes("UNSAVED PREVIOUS SESSION RECOVERY")),

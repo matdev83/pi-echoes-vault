@@ -521,7 +521,7 @@ export default function (pi: ExtensionAPI) {
 			if (cwdKey(ctx.cwd) === launchCwd) {
 				const recovery = await startBackgroundRecovery(ctx.cwd);
 				if (recovery === "started") {
-					notify(ctx, "EchoesVault recovery started in an isolated background session", "info");
+					notify(ctx, `Started EchoesVault updates for "${ctx.cwd}" in the background.`, "info");
 				}
 			}
 			await startSession(ctx.cwd);
