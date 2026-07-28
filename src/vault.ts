@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { GitSnapshot } from "./git-context.ts";
 
-export const PACKAGE_VERSION = "0.3.1";
+export const PACKAGE_VERSION = "0.3.2";
 /** Persisted `.pi/echoes-state.json` schema version (v3 adds isolated recovery metadata). */
 export const STATE_VERSION = 3;
 export const STATE_RELATIVE = path.join(".pi", "echoes-state.json");

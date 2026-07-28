@@ -1,6 +1,6 @@
 {
   "name": "pi-echoes-vault",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "EchoesVault for Pi Agent Harness — persistent agent memory: Markdown/Obsidian-compatible knowledge base, daily logs, architecture/ADR pages, session continuity, and OKF-inspired page conventions. Peer: @earendil-works/pi-coding-agent.",
   "type": "module",
   "license": "MIT",

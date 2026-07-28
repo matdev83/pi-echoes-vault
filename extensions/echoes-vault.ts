@@ -562,7 +562,13 @@ export default function (pi: ExtensionAPI) {
 			gitContextInjected.add(key);
 			const saved = (await readState(ctx.cwd)).gitSnapshot;
 			const current = await captureGitSnapshot(ctx.cwd);
-			return { systemPrompt: `${event.systemPrompt}\n\n${formatGitContext(current, saved)}` };
+			return {
+				message: {
+					customType: "echoes-git-context",
+					content: formatGitContext(current, saved),
+					display: false,
+				},
+			};
 		} catch {
 			return;
 		}

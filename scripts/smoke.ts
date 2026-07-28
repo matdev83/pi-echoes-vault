@@ -36,6 +36,7 @@ type MockCommandContext = {
 	cwd: string;
 	hasUI: boolean;
 	sessionManager: { getSessionFile: () => string | undefined };
+	getSystemPrompt: () => string;
 	isIdle: () => boolean;
 	ui: { notify: (message: string, level?: string) => void };
 };
@@ -77,6 +78,7 @@ function createMockPi() {
 			cwd,
 			hasUI: true,
 			sessionManager: { getSessionFile: () => undefined },
+			getSystemPrompt: () => "system",
 			isIdle: () => idle,
 			ui: {
 				notify(message: string) {
@@ -179,6 +181,16 @@ async function main() {
 		assert.equal(initState.version, STATE_VERSION);
 		assert.equal(initState.session.started, false);
 		assert.equal(initState.session.startPromptSent, false);
+
+		const gitContextResults = await mock.emit(
+			"before_agent_start",
+			{ type: "before_agent_start", prompt: "test", systemPrompt: "system" },
+			cwd,
+		);
+		const gitContext = gitContextResults[0] as { message?: { customType?: string; content?: string; display?: boolean } };
+		assert.equal(gitContext.message?.customType, "echoes-git-context");
+		assert.equal(gitContext.message?.display, false);
+		assert.match(gitContext.message?.content ?? "", /Git snapshot|not inside a Git repository/);
 
 		mock.messages.length = 0;
 		mock.notifies.length = 0;
