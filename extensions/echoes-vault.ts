@@ -39,6 +39,7 @@ import {
 	clearStartPromptSent,
 } from "../src/vault.ts";
 import { startBackgroundRecovery } from "../src/recovery.ts";
+import { captureGitSnapshot, formatGitContext } from "../src/git-context.ts";
 
 type DeliverCtx = {
 	hasUI: boolean;
@@ -214,6 +215,17 @@ export default function (pi: ExtensionAPI) {
 	 * Cleared on successful commit. Does not auto-loop prompts.
 	 */
 	const endPhase = new Map<string, "queued" | "running">();
+	const gitContextInjected = new Set<string>();
+
+	async function gitContextEnabled(cwd: string): Promise<boolean> {
+		try {
+			const raw = await readTextOr(path.join(cwd, ".pi", "echoes-config.json"), "{}");
+			const config = JSON.parse(raw) as { gitContext?: boolean };
+			return config.gitContext !== false;
+		} catch {
+			return true;
+		}
+	}
 
 	async function runEchoesStart(
 		ctx: DeliverCtx & { cwd: string },
@@ -377,7 +389,8 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const result = await commitMemory(ctx.cwd, params);
+			const gitSnapshot = await captureGitSnapshot(ctx.cwd);
+			const result = await commitMemory(ctx.cwd, params, { gitSnapshot });
 			endPhase.delete(cwdKey(ctx.cwd));
 			return textResult(result);
 		},
@@ -527,6 +540,20 @@ export default function (pi: ExtensionAPI) {
 			await startSession(ctx.cwd);
 		} catch {
 			/* non-fatal */
+		}
+	});
+
+	pi.on("before_agent_start", async (event, ctx) => {
+		try {
+			const key = cwdKey(ctx.cwd);
+			if (gitContextInjected.has(key)) return;
+			if (!(await hasExistingVault(ctx.cwd)) || !(await gitContextEnabled(ctx.cwd))) return;
+			gitContextInjected.add(key);
+			const saved = (await readState(ctx.cwd)).gitSnapshot;
+			const current = await captureGitSnapshot(ctx.cwd);
+			return { systemPrompt: `${event.systemPrompt}\n\n${formatGitContext(current, saved)}` };
+		} catch {
+			return;
 		}
 	});
 

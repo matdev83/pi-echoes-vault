@@ -1,7 +1,8 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import type { GitSnapshot } from "./git-context.ts";
 
-export const PACKAGE_VERSION = "0.2.3";
+export const PACKAGE_VERSION = "0.3.0";
 /** Persisted `.pi/echoes-state.json` schema version (v3 adds isolated recovery metadata). */
 export const STATE_VERSION = 3;
 export const STATE_RELATIVE = path.join(".pi", "echoes-state.json");
@@ -64,6 +65,7 @@ export type EchoesState = {
 	initialized: boolean;
 	session: EchoesSessionState;
 	stats: VaultStats;
+	gitSnapshot: GitSnapshot | null;
 };
 
 export const DEFAULT_INDEX = `# EchoesVault Index
@@ -105,6 +107,7 @@ export function defaultState(pluginVersion = PACKAGE_VERSION): EchoesState {
 			totalDailyLogs: 0,
 			deprecatedPages: 0,
 		},
+		gitSnapshot: null,
 	};
 }
 
@@ -375,6 +378,9 @@ export async function readState(cwd: string): Promise<EchoesState> {
 			initialized: asBoolean(parsed.initialized, base.initialized),
 			session: normalizeSessionState(parsed.session),
 			stats: normalizeStats(parsed.stats),
+			gitSnapshot: parsed.gitSnapshot && typeof parsed.gitSnapshot === "object"
+				? parsed.gitSnapshot as GitSnapshot
+				: null,
 		};
 	} catch {
 		return defaultState();
@@ -621,7 +627,7 @@ function indexCoversSlug(indexText: string, appends: string[], slug: string): bo
 export async function commitMemory(
 	cwd: string,
 	args: CommitArgs,
-	options: { recovery?: boolean } = {},
+	options: { recovery?: boolean; gitSnapshot?: GitSnapshot | null } = {},
 ): Promise<string> {
 	return withVaultMutation(cwd, async () => {
 		const paths = await bootstrapVault(cwd);
@@ -684,6 +690,7 @@ export async function commitMemory(
 		st.session.pendingSessionFile = null;
 		st.session.recoveryClaimedAt = null;
 		st.session.lastSave = new Date().toISOString();
+		if (options.gitSnapshot !== undefined) st.gitSnapshot = options.gitSnapshot;
 		st.stats = await collectStats(paths);
 		await writeState(cwd, st);
 

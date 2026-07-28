@@ -6,6 +6,7 @@ import {
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { captureGitSnapshot } from "./git-context.ts";
 import {
 	claimPendingRecovery,
 	commitMemory,
@@ -47,7 +48,8 @@ async function runSdkRecovery(cwd: string, transcript: string): Promise<void> {
 			),
 		}),
 		async execute(_id, params) {
-			return textResult(await commitMemory(cwd, params as CommitArgs, { recovery: true }));
+			const gitSnapshot = await captureGitSnapshot(cwd);
+			return textResult(await commitMemory(cwd, params as CommitArgs, { recovery: true, gitSnapshot }));
 		},
 	};
 

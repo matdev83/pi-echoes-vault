@@ -363,7 +363,7 @@ describe("vault domain", () => {
 		);
 		const st = await readState(cwd);
 		assert.equal(st.version, STATE_VERSION);
-		assert.equal(st.pluginVersion, "0.2.3");
+		assert.equal(st.pluginVersion, "0.3.0");
 		assert.equal(st.initialized, false);
 		assert.equal(st.session.started, false);
 		assert.equal(st.session.saved, false);

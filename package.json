@@ -1,6 +1,6 @@
 {
   "name": "pi-echoes-vault",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "EchoesVault for Pi Agent Harness — persistent agent memory: Markdown/Obsidian-compatible knowledge base, daily logs, architecture/ADR pages, session continuity, and OKF-inspired page conventions. Peer: @earendil-works/pi-coding-agent.",
   "type": "module",
   "license": "MIT",
@@ -37,7 +37,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node --experimental-strip-types --test test/vault.test.ts",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
     "smoke": "node --experimental-strip-types scripts/smoke.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "npm run typecheck && npm test && npm run smoke"

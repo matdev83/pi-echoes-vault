@@ -153,6 +153,7 @@ async function main() {
 		["echoes-end", "echoes-init", "echoes-start", "echoes-status"],
 	);
 	assert.equal((mock.handlers.get("session_start") ?? []).length, 1);
+	assert.equal((mock.handlers.get("before_agent_start") ?? []).length, 1);
 	assert.equal((mock.handlers.get("session_before_switch") ?? []).length, 1);
 	assert.equal((mock.handlers.get("session_before_fork") ?? []).length, 1);
 	assert.equal((mock.handlers.get("session_shutdown") ?? []).length, 1);
