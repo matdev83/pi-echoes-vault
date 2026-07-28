@@ -35,6 +35,7 @@ type CommandDef = {
 type MockCommandContext = {
 	cwd: string;
 	hasUI: boolean;
+	sessionManager: { getSessionFile: () => string | undefined };
 	isIdle: () => boolean;
 	ui: { notify: (message: string, level?: string) => void };
 };
@@ -75,6 +76,7 @@ function createMockPi() {
 		return {
 			cwd,
 			hasUI: true,
+			sessionManager: { getSessionFile: () => undefined },
 			isIdle: () => idle,
 			ui: {
 				notify(message: string) {
@@ -418,23 +420,44 @@ async function main() {
 		pending.session.endPromptSent = false;
 		await writeState(lifecycle, pending);
 
+		const mockCrossProject = createMockPi();
+		mod.default(mockCrossProject.api);
+		await mockCrossProject.emit(
+			"session_start",
+			{ type: "session_start", reason: "startup" },
+			lifecycle,
+		);
+		assert.ok(
+			mockCrossProject.messages.some((m) => m.content.includes("Context Restoration")),
+			"restart must not be blocked by persisted startPromptSent",
+		);
+		assert.ok(
+			mockCrossProject.notifies.every((m) => !m.includes("isolated background session")),
+			"recovery must not start from another launch folder",
+		);
+		assert.equal((await readState(lifecycle)).session.endPending, true);
+
+		const originalCwd = process.cwd();
+		process.chdir(lifecycle);
 		const mockRestart = createMockPi();
-		mod.default(mockRestart.api);
-		mockRestart.messages.length = 0;
+		try {
+			mod.default(mockRestart.api);
+		} finally {
+			process.chdir(originalCwd);
+		}
 		await mockRestart.emit(
 			"session_start",
 			{ type: "session_start", reason: "startup" },
 			lifecycle,
 		);
 		assert.ok(
-			mockRestart.messages.some((m) => m.content.includes("Context Restoration")),
-			"restart must not be blocked by persisted startPromptSent",
+			mockRestart.notifies.some((m) => m.includes("isolated background session")),
+			"same-folder pending recovery must start outside the interactive context",
 		);
 		assert.ok(
-			mockRestart.messages.some((m) => m.content.includes("UNSAVED PREVIOUS SESSION RECOVERY")),
-			"endPending recovery must be included",
+			mockRestart.messages.every((m) => !m.content.includes("UNSAVED PREVIOUS SESSION RECOVERY")),
+			"recovery instructions must not pollute the interactive context",
 		);
-		assert.equal((await readState(lifecycle)).session.endPending, true);
 
 		// session_shutdown quit records endPending only when unsaved+started
 		const quitCwd = await mkdtemp(path.join(tmpdir(), "echoes-quit-"));

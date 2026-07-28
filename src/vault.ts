@@ -1,9 +1,9 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-export const PACKAGE_VERSION = "0.1.0";
-/** Persisted `.pi/echoes-state.json` schema version (v2 adds lifecycle flags). */
-export const STATE_VERSION = 2;
+export const PACKAGE_VERSION = "0.2.0";
+/** Persisted `.pi/echoes-state.json` schema version (v3 adds isolated recovery metadata). */
+export const STATE_VERSION = 3;
 export const STATE_RELATIVE = path.join(".pi", "echoes-state.json");
 export const MAX_SEARCH_RESULTS = 50;
 export const MAX_LINE_PREVIEW = 200;
@@ -49,6 +49,10 @@ export type EchoesSessionState = {
 	endPromptSent: boolean;
 	/** True when a prior quit left the session unsaved; cleared only by successful commit. */
 	endPending: boolean;
+	/** Session transcript associated with endPending, when Pi persisted one. */
+	pendingSessionFile: string | null;
+	/** ISO timestamp lease preventing concurrent background recovery attempts. */
+	recoveryClaimedAt: string | null;
 	lastStart: string | null;
 	lastSave: string | null;
 };
@@ -82,6 +86,8 @@ export function defaultSessionState(): EchoesSessionState {
 		startPromptSent: false,
 		endPromptSent: false,
 		endPending: false,
+		pendingSessionFile: null,
+		recoveryClaimedAt: null,
 		lastStart: null,
 		lastSave: null,
 	};
@@ -183,6 +189,8 @@ function normalizeSessionState(raw: unknown): EchoesSessionState {
 		startPromptSent: asBoolean(s.startPromptSent, base.startPromptSent),
 		endPromptSent: asBoolean(s.endPromptSent, base.endPromptSent),
 		endPending: asBoolean(s.endPending, base.endPending),
+		pendingSessionFile: asNullableString(s.pendingSessionFile),
+		recoveryClaimedAt: asNullableString(s.recoveryClaimedAt),
 		lastStart: asNullableString(s.lastStart),
 		lastSave: asNullableString(s.lastSave),
 	};
@@ -433,6 +441,8 @@ export async function activateVault(cwd: string): Promise<EchoesState> {
 		st.session.startPromptSent = false;
 		st.session.endPromptSent = false;
 		st.session.endPending = false;
+		st.session.pendingSessionFile = null;
+		st.session.recoveryClaimedAt = null;
 		st.pluginVersion = PACKAGE_VERSION;
 		st.stats = await collectStats(resolveVaultPaths(cwd));
 		await writeState(cwd, st);
@@ -503,15 +513,47 @@ export async function clearEndPromptSent(cwd: string): Promise<EchoesState> {
  * On process quit with an unsaved started session, record recovery for the
  * next eligible session_start. Does nothing for reload or already-saved sessions.
  */
-export async function recordEndPendingOnQuit(cwd: string): Promise<boolean> {
+export async function recordEndPendingOnQuit(
+	cwd: string,
+	sessionFile?: string,
+): Promise<boolean> {
 	return withVaultMutation(cwd, async () => {
 		if (!(await hasExistingVault(cwd))) return false;
 		const st = await readState(cwd);
 		if (st.session.saved || !st.session.started) return false;
 		st.session.endPending = true;
+		st.session.pendingSessionFile = sessionFile ? path.resolve(sessionFile) : null;
+		st.session.recoveryClaimedAt = null;
 		st.version = STATE_VERSION;
 		await writeState(cwd, st);
 		return true;
+	});
+}
+
+const RECOVERY_LEASE_MS = 30 * 60 * 1000;
+
+/** Atomically claim pending recovery. Stale claims are reclaimable after 30 minutes. */
+export async function claimPendingRecovery(cwd: string, now = new Date()): Promise<string | null> {
+	return withVaultMutation(cwd, async () => {
+		const st = await readState(cwd);
+		if (!st.session.endPending) return null;
+		const claimedAt = st.session.recoveryClaimedAt
+			? Date.parse(st.session.recoveryClaimedAt)
+			: Number.NaN;
+		if (Number.isFinite(claimedAt) && now.getTime() - claimedAt < RECOVERY_LEASE_MS) return null;
+		st.session.recoveryClaimedAt = now.toISOString();
+		await writeState(cwd, st);
+		return st.session.pendingSessionFile ?? "";
+	});
+}
+
+/** Release a failed recovery claim while preserving endPending for a later retry. */
+export async function releasePendingRecovery(cwd: string): Promise<void> {
+	await withVaultMutation(cwd, async () => {
+		const st = await readState(cwd);
+		if (!st.session.endPending) return;
+		st.session.recoveryClaimedAt = null;
+		await writeState(cwd, st);
 	});
 }
 
@@ -577,7 +619,11 @@ function indexCoversSlug(indexText: string, appends: string[], slug: string): bo
 	return appends.some((line) => line.includes(link));
 }
 
-export async function commitMemory(cwd: string, args: CommitArgs): Promise<string> {
+export async function commitMemory(
+	cwd: string,
+	args: CommitArgs,
+	options: { recovery?: boolean } = {},
+): Promise<string> {
 	return withVaultMutation(cwd, async () => {
 		const paths = await bootstrapVault(cwd);
 		const indexAppends = args.indexAppends ?? [];
@@ -630,10 +676,14 @@ export async function commitMemory(cwd: string, args: CommitArgs): Promise<strin
 		const st = await readState(cwd);
 		st.version = STATE_VERSION;
 		st.initialized = true;
-		st.session.started = false;
-		st.session.saved = true;
-		st.session.endPromptSent = true;
+		if (!options.recovery) {
+			st.session.started = false;
+			st.session.saved = true;
+			st.session.endPromptSent = true;
+		}
 		st.session.endPending = false;
+		st.session.pendingSessionFile = null;
+		st.session.recoveryClaimedAt = null;
 		st.session.lastSave = new Date().toISOString();
 		st.stats = await collectStats(paths);
 		await writeState(cwd, st);

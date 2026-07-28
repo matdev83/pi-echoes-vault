@@ -3,10 +3,12 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it, after } from "node:test";
+import { startBackgroundRecovery } from "../src/recovery.ts";
 import {
 	activateVault,
 	appendDailyLog,
 	bootstrapVault,
+	claimPendingRecovery,
 	commitMemory,
 	createOrUpdatePage,
 	DEFAULT_INDEX,
@@ -15,6 +17,7 @@ import {
 	needsAutomaticEnd,
 	readState,
 	recordEndPendingOnQuit,
+	releasePendingRecovery,
 	sanitizeFilename,
 	searchVaultPages,
 	startSession,
@@ -358,7 +361,7 @@ describe("vault domain", () => {
 		);
 		const st = await readState(cwd);
 		assert.equal(st.version, STATE_VERSION);
-		assert.equal(st.pluginVersion, "0.1.0");
+		assert.equal(st.pluginVersion, "0.2.0");
 		assert.equal(st.initialized, false);
 		assert.equal(st.session.started, false);
 		assert.equal(st.session.saved, false);
@@ -459,6 +462,57 @@ describe("vault domain", () => {
 		assert.equal(after.session.endPromptSent, true);
 		assert.equal(after.session.endPending, false);
 		assert.equal(await needsAutomaticEnd(cwd), false);
+	});
+
+	it("claims pending recovery once, releases failures, and clears it on commit", async () => {
+		const cwd = await tempCwd();
+		await activateVault(cwd);
+		await startSession(cwd);
+		const transcript = path.join(cwd, "interrupted.jsonl");
+		await recordEndPendingOnQuit(cwd, transcript);
+
+		assert.equal(await claimPendingRecovery(cwd), path.resolve(transcript));
+		assert.equal(await claimPendingRecovery(cwd), null, "active lease dedupes recovery");
+		await releasePendingRecovery(cwd);
+		assert.equal(await claimPendingRecovery(cwd), path.resolve(transcript));
+
+		await commitMemory(cwd, { dailySummary: "Recovered." });
+		const saved = await readState(cwd);
+		assert.equal(saved.session.endPending, false);
+		assert.equal(saved.session.pendingSessionFile, null);
+		assert.equal(saved.session.recoveryClaimedAt, null);
+		assert.equal(await claimPendingRecovery(cwd), null);
+	});
+
+	it("launches recovery outside the caller and releases a failed background claim", async () => {
+		const cwd = await tempCwd();
+		await activateVault(cwd);
+		await startSession(cwd);
+		const transcript = path.join(cwd, "interrupted.jsonl");
+		await writeFile(transcript, '{"type":"message","text":"Recovered fact"}\n');
+		await recordEndPendingOnQuit(cwd, transcript);
+
+		let received = "";
+		let rejectRun!: (error: Error) => void;
+		const failed = new Promise<void>((_resolve, reject) => { rejectRun = reject; });
+		assert.equal(
+			await startBackgroundRecovery(cwd, {
+				run: async (_cwd, content) => {
+					received = content;
+					await failed;
+				},
+			}),
+			"started",
+		);
+		assert.match(received, /Recovered fact/);
+		assert.equal(await startBackgroundRecovery(cwd, { run: async () => {} }), "not-pending");
+
+		rejectRun(new Error("simulated worker failure"));
+		for (let i = 0; i < 50 && (await readState(cwd)).session.recoveryClaimedAt; i++) {
+			await new Promise((resolve) => setTimeout(resolve, 1));
+		}
+		assert.equal((await readState(cwd)).session.recoveryClaimedAt, null);
+		assert.equal((await readState(cwd)).session.endPending, true);
 	});
 
 	it("recordEndPendingOnQuit only for unsaved started vault sessions", async () => {

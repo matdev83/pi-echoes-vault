@@ -38,6 +38,7 @@ import {
 	startSession,
 	clearStartPromptSent,
 } from "../src/vault.ts";
+import { startBackgroundRecovery } from "../src/recovery.ts";
 
 type DeliverCtx = {
 	hasUI: boolean;
@@ -179,13 +180,6 @@ Output a concise bulleted dashboard:
 If total topics > 200, append a \`> [!warning] SCALE ALERT\` block. Keep under 90 words. No filler.
 `;
 
-const RECOVERY_SECTION = `
-## UNSAVED PREVIOUS SESSION RECOVERY
-A previous Pi session ended without a successful \`commit_memory_to_echoes_vault\`.
-If the conversation or daily scratchpad contains unsaved work from that prior session, distill and commit it (via \`commit_memory_to_echoes_vault\`) before or as part of today's first save.
-Do not invent prior-session facts that are not present in the provided logs or conversation.
-`;
-
 function startTriggerText(trigger: PromptTrigger): string {
 	return trigger === "automatic"
 		? "automatic Pi session-start restoration. Do not ask the user to run /echoes-start."
@@ -199,6 +193,10 @@ function endTriggerText(trigger: PromptTrigger): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	// A resumed session can retain its original cwd even when Pi was launched elsewhere.
+	// Recovery must never cross that launch-directory boundary.
+	const launchCwd = cwdKey(process.cwd());
+
 	/**
 	 * Runtime-local start dedupe keyed by cwd for this extension instance.
 	 * Cleared on each logical session_start (startup/new/resume/fork) so the
@@ -236,8 +234,6 @@ export default function (pi: ExtensionAPI) {
 			return false;
 		}
 
-		const before = await readState(ctx.cwd);
-		const endPending = before.session.endPending;
 		await startSession(ctx.cwd);
 
 		const paths = resolveVaultPaths(ctx.cwd);
@@ -246,10 +242,6 @@ export default function (pi: ExtensionAPI) {
 		let prompt = START_PROMPT.replace("{{TRIGGER}}", startTriggerText(trigger))
 			.replace("{{INDEX}}", index)
 			.replace("{{RECENT_LOGS}}", recent);
-		if (endPending) {
-			prompt += RECOVERY_SECTION;
-		}
-
 		startDeliveredThisRuntime.add(key);
 		await markStartPromptSent(ctx.cwd);
 		try {
@@ -527,6 +519,12 @@ export default function (pi: ExtensionAPI) {
 			// Logical new/resume/fork/startup may reuse this extension instance.
 			// Reset runtime-local start dedupe so restoration can run again.
 			startDeliveredThisRuntime.delete(cwdKey(ctx.cwd));
+			if (cwdKey(ctx.cwd) === launchCwd) {
+				const recovery = await startBackgroundRecovery(ctx.cwd);
+				if (recovery === "started") {
+					notify(ctx, "EchoesVault recovery started in an isolated background session", "info");
+				}
+			}
 			await runEchoesStart(ctx, "automatic");
 		} catch {
 			/* non-fatal */
@@ -553,7 +551,7 @@ export default function (pi: ExtensionAPI) {
 		try {
 			// Never send a model prompt here — teardown aborts any queued turn.
 			if (event.reason !== "quit") return;
-			await recordEndPendingOnQuit(ctx.cwd);
+			await recordEndPendingOnQuit(ctx.cwd, ctx.sessionManager.getSessionFile());
 		} catch {
 			/* non-fatal */
 		}
