@@ -105,7 +105,7 @@ Pushing a `v*` tag that matches `package.json` `version` runs `.github/workflows
 
 ### Automatic session lifecycle
 
-When the extension is loaded **and** a real vault already exists (`EchoesVault/` directory with `index.md`):
+When the extension is loaded **and** the project was explicitly activated with `/echoes-init` (`.pi/echoes-enabled` marker plus `EchoesVault/index.md`):
 
 | Event | Behavior |
 |-------|----------|
@@ -137,7 +137,7 @@ On before-switch/fork handler errors while a save is still needed, the transitio
 - `echoes_search_vault_pages` — bounded keyword search under `pages/`
 - `echoes_create_or_update_page` — create/update a page; `indexDescription` required for new files
 
-Activation / session tracking is handled in command handlers and lifecycle hooks (not separate model tools).
+Activation / session tracking is handled in command handlers and lifecycle hooks (not separate model tools). `/echoes-init` writes `.pi/echoes-enabled`; incidental or legacy auto-created `EchoesVault/` files do not activate automatic behavior. Existing intentional vaults created before v0.2.3 must run `/echoes-init` once to opt in explicitly.
 
 ### Skills
 
