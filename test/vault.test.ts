@@ -288,13 +288,11 @@ describe("vault domain", () => {
 		assert.equal(await hasExistingEchoesPresence(empty), true);
 	});
 
-	it("hasExistingVault requires explicit activation, not incidental files or state", async () => {
+	it("hasExistingVault activates from the EchoesVault directory alone", async () => {
 		const cwd = await tempCwd();
 		assert.equal(await hasExistingVault(cwd), false);
 		await mkdir(path.join(cwd, "EchoesVault"), { recursive: true });
-		assert.equal(await hasExistingVault(cwd), false);
-		await writeFile(path.join(cwd, "EchoesVault", "index.md"), DEFAULT_INDEX);
-		assert.equal(await hasExistingVault(cwd), false, "index alone must not activate the extension");
+		assert.equal(await hasExistingVault(cwd), true);
 		await activateVault(cwd);
 		assert.equal(await hasExistingVault(cwd), true);
 
@@ -363,7 +361,7 @@ describe("vault domain", () => {
 		);
 		const st = await readState(cwd);
 		assert.equal(st.version, STATE_VERSION);
-		assert.equal(st.pluginVersion, "0.3.0");
+		assert.equal(st.pluginVersion, "0.3.1");
 		assert.equal(st.initialized, false);
 		assert.equal(st.session.started, false);
 		assert.equal(st.session.saved, false);

@@ -2,11 +2,10 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { GitSnapshot } from "./git-context.ts";
 
-export const PACKAGE_VERSION = "0.3.0";
+export const PACKAGE_VERSION = "0.3.1";
 /** Persisted `.pi/echoes-state.json` schema version (v3 adds isolated recovery metadata). */
 export const STATE_VERSION = 3;
 export const STATE_RELATIVE = path.join(".pi", "echoes-state.json");
-export const ACTIVATION_RELATIVE = path.join(".pi", "echoes-enabled");
 export const MAX_SEARCH_RESULTS = 50;
 export const MAX_LINE_PREVIEW = 200;
 
@@ -217,16 +216,13 @@ export async function hasExistingEchoesPresence(cwd: string): Promise<boolean> {
 	return (await pathExists(paths.vault)) || (await pathExists(statePath(cwd)));
 }
 
-/** True only for a vault explicitly enabled through /echoes-init. */
+/** True when `EchoesVault/` exists as a directory. */
 export async function hasExistingVault(cwd: string): Promise<boolean> {
-	const paths = resolveVaultPaths(cwd);
 	try {
-		const st = await fs.stat(paths.vault);
-		if (!st.isDirectory()) return false;
+		return (await fs.stat(resolveVaultPaths(cwd).vault)).isDirectory();
 	} catch {
 		return false;
 	}
-	return (await pathExists(paths.index)) && (await pathExists(path.join(cwd, ACTIVATION_RELATIVE)));
 }
 
 /** Unsaved session that still needs an end/commit fallback. */
@@ -437,7 +433,6 @@ export async function refreshStats(cwd: string): Promise<EchoesState> {
 export async function activateVault(cwd: string): Promise<EchoesState> {
 	return withVaultMutation(cwd, async () => {
 		await bootstrapVault(cwd);
-		await writeFileAtomic(path.join(cwd, ACTIVATION_RELATIVE), "enabled\n");
 		const st = await readState(cwd);
 		st.version = STATE_VERSION;
 		st.initialized = true;

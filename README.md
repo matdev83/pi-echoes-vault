@@ -105,7 +105,7 @@ Pushing a `v*` tag that matches `package.json` `version` runs `.github/workflows
 
 ### Automatic session lifecycle
 
-When the extension is loaded **and** the project was explicitly activated with `/echoes-init` (`.pi/echoes-enabled` marker plus `EchoesVault/index.md`):
+When the extension is loaded and an `EchoesVault/` directory exists in the project, automatic behavior is enabled by default:
 
 | Event | Behavior |
 |-------|----------|
@@ -118,7 +118,7 @@ When the extension is loaded **and** the project was explicitly activated with `
 
 Successful `commit_memory_to_echoes_vault` is the authoritative “already saved” signal: it clears `endPending`, marks `saved`, and suppresses automatic end prompts.
 
-Automatic session starts never inject EchoesVault messages or trigger an interactive model turn. On the first user-driven turn, activated projects add a bounded local Git snapshot to the system context (repository/worktree, branch/HEAD, cached upstream ahead/behind, operation state, and staged/unstaged/untracked/conflicted counts). The snapshot is compared with the latest successful vault update and collapses to one line when unchanged. It never fetches or uses the network. Disable it per project with `.pi/echoes-config.json`: `{ "gitContext": false }`. Use `/echoes-start` when explicit interactive vault restoration is wanted; manual restoration is deduplicated within the current extension runtime. Interrupted-session recovery is narrower: only Pi launched in the same project folder may claim `endPending`. Recovery runs in a separate in-memory Pi SDK session with extension/context discovery disabled and only the EchoesVault commit tool enabled, so its transcript and instructions never enter the new interactive context. A persisted 30-minute lease prevents duplicate workers; failures release the claim for retry, while a successful commit clears `endPending` and the transcript reference.
+Automatic session starts never inject EchoesVault messages or trigger an interactive model turn. On the first user-driven turn, projects containing `EchoesVault/` add a bounded local Git snapshot to the system context (repository/worktree, branch/HEAD, cached upstream ahead/behind, operation state, and staged/unstaged/untracked/conflicted counts). The snapshot is compared with the latest successful vault update and collapses to one line when unchanged. It never fetches or uses the network. Configure opt-outs per project in `.pi/echoes-config.json`: `{ "gitContext": false }` disables only Git context; `{ "automaticActions": false }` disables all automatic lifecycle, recovery, and Git-context behavior while preserving manual commands. Use `/echoes-start` when explicit interactive vault restoration is wanted; manual restoration is deduplicated within the current extension runtime. Interrupted-session recovery is narrower: only Pi launched in the same project folder may claim `endPending`. Recovery runs in a separate in-memory Pi SDK session with extension/context discovery disabled and only the EchoesVault commit tool enabled, so its transcript and instructions never enter the new interactive context. A persisted 30-minute lease prevents duplicate workers; failures release the claim for retry, while a successful commit clears `endPending` and the transcript reference.
 
 State read-modify-write for lifecycle and commit is serialized **in-process** per cwd (no cross-process lock).
 
@@ -137,7 +137,7 @@ On before-switch/fork handler errors while a save is still needed, the transitio
 - `echoes_search_vault_pages` — bounded keyword search under `pages/`
 - `echoes_create_or_update_page` — create/update a page; `indexDescription` required for new files
 
-Activation / session tracking is handled in command handlers and lifecycle hooks (not separate model tools). `/echoes-init` writes `.pi/echoes-enabled`; incidental or legacy auto-created `EchoesVault/` files do not activate automatic behavior. Existing intentional vaults created before v0.2.3 must run `/echoes-init` once to opt in explicitly.
+Activation is convention-based: the presence of an `EchoesVault/` directory enables the extension with no migration or initialization action required. `/echoes-init` remains available to create and bootstrap a vault. Session tracking is handled in command handlers and lifecycle hooks (not separate model tools).
 
 ### Skills
 

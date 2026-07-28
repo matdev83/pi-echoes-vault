@@ -217,14 +217,24 @@ export default function (pi: ExtensionAPI) {
 	const endPhase = new Map<string, "queued" | "running">();
 	const gitContextInjected = new Set<string>();
 
-	async function gitContextEnabled(cwd: string): Promise<boolean> {
+	type EchoesConfig = { automaticActions?: boolean; gitContext?: boolean };
+
+	async function readConfig(cwd: string): Promise<EchoesConfig> {
 		try {
 			const raw = await readTextOr(path.join(cwd, ".pi", "echoes-config.json"), "{}");
-			const config = JSON.parse(raw) as { gitContext?: boolean };
-			return config.gitContext !== false;
+			return JSON.parse(raw) as EchoesConfig;
 		} catch {
-			return true;
+			return {};
 		}
+	}
+
+	async function automaticActionsEnabled(cwd: string): Promise<boolean> {
+		return (await readConfig(cwd)).automaticActions !== false;
+	}
+
+	async function gitContextEnabled(cwd: string): Promise<boolean> {
+		const config = await readConfig(cwd);
+		return config.automaticActions !== false && config.gitContext !== false;
 	}
 
 	async function runEchoesStart(
@@ -322,7 +332,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	async function handlePreClose(ctx: ExtensionContext): Promise<{ cancel: true } | undefined> {
-		if (!(await needsAutomaticEnd(ctx.cwd))) return undefined;
+		if (!(await automaticActionsEnabled(ctx.cwd)) || !(await needsAutomaticEnd(ctx.cwd))) return undefined;
 
 		const st = await readState(ctx.cwd);
 		const key = cwdKey(ctx.cwd);
@@ -528,6 +538,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (!AUTO_START_REASONS.has(event.reason)) return;
+			if (!(await automaticActionsEnabled(ctx.cwd))) return;
 
 			// Automatic starts are lifecycle-only. Interactive restoration is explicit via /echoes-start.
 			startDeliveredThisRuntime.delete(cwdKey(ctx.cwd));
@@ -576,7 +587,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", async (event: SessionShutdownEvent, ctx) => {
 		try {
 			// Never send a model prompt here — teardown aborts any queued turn.
-			if (event.reason !== "quit") return;
+			if (event.reason !== "quit" || !(await automaticActionsEnabled(ctx.cwd))) return;
 			await recordEndPendingOnQuit(ctx.cwd, ctx.sessionManager.getSessionFile());
 		} catch {
 			/* non-fatal */
