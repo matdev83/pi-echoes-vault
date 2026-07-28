@@ -85,7 +85,15 @@ export function formatGitContext(current: GitSnapshot | null, saved: GitSnapshot
 	if (!current) return "EchoesVault environment: current directory is not inside a Git repository.";
 	const unchanged = saved?.repoRoot === current.repoRoot && saved.fingerprint === current.fingerprint;
 	const dirty = current.staged + current.unstaged + current.untracked + current.conflicted;
-	if (unchanged) return `EchoesVault environment: branch \`${current.branch}\`; ${dirty ? "worktree unchanged since the last vault update" : "status clean"}; local Git state matches the last vault update.`;
+	if (unchanged) {
+		const status = dirty
+			? `DIRTY worktree: ${current.staged} staged, ${current.unstaged} unstaged, ${current.untracked} untracked, ${current.conflicted} conflicted`
+			: "CLEAN worktree";
+		const paths = current.paths.length
+			? ` Changed paths: ${current.paths.map((p) => `\`${p}\``).join(", ")}.`
+			: "";
+		return `EchoesVault environment: branch \`${current.branch}\`; ${status}; this exact local Git state matches the last vault update.${paths}`;
+	}
 	const worktree = current.gitDir !== current.commonDir ? `linked worktree (common Git dir: \`${current.commonDir}\`)` : "regular checkout";
 	const lines = [
 		"EchoesVault local Git snapshot:",

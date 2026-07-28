@@ -39,6 +39,12 @@ describe("Git context", () => {
 		const text = formatGitContext(changed, saved);
 		assert.match(text, /local Git state changed/);
 		assert.match(text, /tracked\.txt/);
+
+		const unchangedDirty = formatGitContext(changed, changed);
+		assert.match(unchangedDirty, /DIRTY worktree/);
+		assert.match(unchangedDirty, /1 unstaged, 1 untracked/);
+		assert.match(unchangedDirty, /new\.txt/);
+		assert.doesNotMatch(unchangedDirty, /status clean/);
 	});
 
 	it("reports a non-repository without throwing", async () => {
