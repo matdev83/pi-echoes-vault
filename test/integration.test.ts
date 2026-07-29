@@ -78,7 +78,7 @@ function injectedText(result: ContextResult): string | undefined {
 }
 
 describe("Extension chain integration (mock harness)", () => {
-	it("injects cross-session memory and git context as a genuine user-role message once per logical session", async () => {
+	it("injects cross-session memory on every request and git context once per logical session", async () => {
 		const cwd = await vaultDir();
 		const mock = createMockPi();
 		echoesExtension(mock.api as never);
@@ -95,7 +95,10 @@ describe("Extension chain integration (mock harness)", () => {
 		assert.equal(first.messages!.length, CONTEXT.messages.length + 1, "original messages preserved");
 
 		const second = (await mock.emit("context", CONTEXT, cwd))[0] as ContextResult;
-		assert.equal(second, undefined, "injects only once per logical session");
+		const secondText = injectedText(second) ?? "";
+		assert.match(secondText, /EchoesVault cross-session context/);
+		assert.match(secondText, /Previous session outcome/);
+		assert.doesNotMatch(secondText, /EchoesVault local Git snapshot|not inside a Git repository/);
 
 		const beforeResults = await mock.emit("before_agent_start", BEFORE, cwd);
 		assert.equal(beforeResults.length, 0, "no before_agent_start handler remains");
@@ -153,7 +156,12 @@ describe("Extension chain integration (mock harness)", () => {
 		const first = (await mock.emit("context", CONTEXT, cwd))[0] as ContextResult;
 		assert.ok(first?.messages, "injects on first turn");
 		const second = (await mock.emit("context", CONTEXT, cwd))[0] as ContextResult;
-		assert.equal(second, undefined, "deduped within a session");
+		assert.match(injectedText(second) ?? "", /EchoesVault cross-session context/);
+		assert.doesNotMatch(
+			injectedText(second) ?? "",
+			/EchoesVault local Git snapshot|not inside a Git repository/,
+			"git snapshot remains deduped within a session",
+		);
 
 		for (const reason of ["new", "resume", "fork"] as const) {
 			await mock.emit("session_start", { type: "session_start", reason }, cwd);

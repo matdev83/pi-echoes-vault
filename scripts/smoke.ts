@@ -43,6 +43,9 @@ type MockCommandContext = {
 };
 
 type SessionHandler = (event: unknown, ctx: MockCommandContext) => Promise<unknown>;
+type ContextResult = {
+	messages?: Array<{ content?: Array<{ text?: string }> }>;
+};
 
 function createMockPi() {
 	const tools: ToolDef[] = [];
@@ -201,7 +204,11 @@ async function main() {
 			/Git snapshot|not inside a Git repository/,
 		);
 		const secondContext = await mock.emit("context", contextEvent, cwd);
-		assert.equal(secondContext[0], undefined, "git context injects only once per logical session");
+		const secondText = (secondContext[0] as ContextResult)?.messages?.at(-1)?.content
+			?.map((c) => c.text ?? "")
+			.join("\n") ?? "";
+		assert.match(secondText, /EchoesVault cross-session context/);
+		assert.doesNotMatch(secondText, /Git snapshot|not inside a Git repository/);
 
 		mock.messages.length = 0;
 		mock.notifies.length = 0;

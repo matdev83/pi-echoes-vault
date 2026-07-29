@@ -243,7 +243,6 @@ export default function (pi: ExtensionAPI) {
 	 */
 	const endPhase = new Map<string, "queued" | "running">();
 	const gitContextInjected = new Set<string>();
-	const memoryContextInjected = new Set<string>();
 
 	type PrStateEntry = { status: "fetching" | "done"; result?: PrContextResult; injected: boolean };
 	const prState = new Map<string, PrStateEntry>();
@@ -581,7 +580,6 @@ export default function (pi: ExtensionAPI) {
 			// A logical session replacement gets a fresh once-per-session Git context injection.
 			startDeliveredThisRuntime.delete(cwdKey(ctx.cwd));
 			gitContextInjected.delete(cwdKey(ctx.cwd));
-			memoryContextInjected.delete(cwdKey(ctx.cwd));
 			prState.delete(cwdKey(ctx.cwd));
 			if (cwdKey(ctx.cwd) === launchCwd) {
 				const project = ctx.cwd;
@@ -648,17 +646,17 @@ export default function (pi: ExtensionAPI) {
 
 			const parts: string[] = [];
 
-			if (!memoryContextInjected.has(key)) {
-				const paths = resolveVaultPaths(ctx.cwd);
-				const [index, recent] = await Promise.all([
-					readTextOr(paths.index, "EchoesVault/index.md not found"),
-					readRecentDailyLogs(ctx.cwd, 3),
-				]);
-				memoryContextInjected.add(key);
-				parts.push(
-					CROSS_SESSION_CONTEXT.replace("{{INDEX}}", index).replace("{{RECENT_LOGS}}", recent),
-				);
-			}
+			// Context-event messages are request-only and never enter the transcript.
+			// Reattach persistent memory on every LLM call so it remains available
+			// after the first response and throughout the logical session.
+			const paths = resolveVaultPaths(ctx.cwd);
+			const [index, recent] = await Promise.all([
+				readTextOr(paths.index, "EchoesVault/index.md not found"),
+				readRecentDailyLogs(ctx.cwd, 3),
+			]);
+			parts.push(
+				CROSS_SESSION_CONTEXT.replace("{{INDEX}}", index).replace("{{RECENT_LOGS}}", recent),
+			);
 
 			if (config.gitContext && !gitContextInjected.has(key)) {
 				gitContextInjected.add(key);
