@@ -162,6 +162,20 @@ If memory has already been committed during this session, do not commit again.
 Otherwise compile these and call the tool exactly once now.
 `;
 
+const CROSS_SESSION_CONTEXT = `EchoesVault cross-session context (automatically restored from persistent memory):
+
+## Knowledge-base registry (EchoesVault/index.md)
+<index>
+{{INDEX}}
+</index>
+
+## Recent work logs (newest first, up to 3 sessions)
+<recent_logs>
+{{RECENT_LOGS}}
+</recent_logs>
+
+Use this context to continue prior work. Do not claim that no cross-session memory was supplied, and do not announce this hidden context unless it is relevant to the user's request.`;
+
 const STATUS_PROMPT = `# SYSTEM MESSAGE: Vault Status Report
 Provide a fast, token-efficient metrics dashboard. Do NOT analyze deep architectural meaning.
 
@@ -229,6 +243,7 @@ export default function (pi: ExtensionAPI) {
 	 */
 	const endPhase = new Map<string, "queued" | "running">();
 	const gitContextInjected = new Set<string>();
+	const memoryContextInjected = new Set<string>();
 
 	type PrStateEntry = { status: "fetching" | "done"; result?: PrContextResult; injected: boolean };
 	const prState = new Map<string, PrStateEntry>();
@@ -566,6 +581,7 @@ export default function (pi: ExtensionAPI) {
 			// A logical session replacement gets a fresh once-per-session Git context injection.
 			startDeliveredThisRuntime.delete(cwdKey(ctx.cwd));
 			gitContextInjected.delete(cwdKey(ctx.cwd));
+			memoryContextInjected.delete(cwdKey(ctx.cwd));
 			prState.delete(cwdKey(ctx.cwd));
 			if (cwdKey(ctx.cwd) === launchCwd) {
 				const project = ctx.cwd;
@@ -631,6 +647,18 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const parts: string[] = [];
+
+			if (!memoryContextInjected.has(key)) {
+				const paths = resolveVaultPaths(ctx.cwd);
+				const [index, recent] = await Promise.all([
+					readTextOr(paths.index, "EchoesVault/index.md not found"),
+					readRecentDailyLogs(ctx.cwd, 3),
+				]);
+				memoryContextInjected.add(key);
+				parts.push(
+					CROSS_SESSION_CONTEXT.replace("{{INDEX}}", index).replace("{{RECENT_LOGS}}", recent),
+				);
+			}
 
 			if (config.gitContext && !gitContextInjected.has(key)) {
 				gitContextInjected.add(key);

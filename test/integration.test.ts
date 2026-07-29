@@ -59,8 +59,9 @@ function createMockPi(mode = "tui") {
 async function vaultDir(): Promise<string> {
 	const cwd = await mkdtemp(path.join(tmpdir(), "echoes-int-"));
 	cleanup.push(cwd);
-	await mkdir(path.join(cwd, "EchoesVault"), { recursive: true });
-	await writeFile(path.join(cwd, "EchoesVault", "index.md"), "# Index\n");
+	await mkdir(path.join(cwd, "EchoesVault", "daily"), { recursive: true });
+	await writeFile(path.join(cwd, "EchoesVault", "index.md"), "# Index\n- [[architecture]]: Core design.\n");
+	await writeFile(path.join(cwd, "EchoesVault", "daily", "2026-07-28.md"), "Previous session outcome.\n");
 	return cwd;
 }
 
@@ -77,7 +78,7 @@ function injectedText(result: ContextResult): string | undefined {
 }
 
 describe("Extension chain integration (mock harness)", () => {
-	it("injects git context as a genuine user-role message once per logical session", async () => {
+	it("injects cross-session memory and git context as a genuine user-role message once per logical session", async () => {
 		const cwd = await vaultDir();
 		const mock = createMockPi();
 		echoesExtension(mock.api as never);
@@ -86,7 +87,11 @@ describe("Extension chain integration (mock harness)", () => {
 		assert.ok(first?.messages, "context handler returns modified messages");
 		const appended = first.messages!.at(-1)!;
 		assert.equal(appended.role, "user", "injected message must use the standard user role");
-		assert.match(injectedText(first) ?? "", /EchoesVault|not inside a Git repository/);
+		const text = injectedText(first) ?? "";
+		assert.match(text, /EchoesVault cross-session context/);
+		assert.match(text, /\[\[architecture\]\]: Core design/);
+		assert.match(text, /Previous session outcome/);
+		assert.match(text, /EchoesVault local Git snapshot|not inside a Git repository/);
 		assert.equal(first.messages!.length, CONTEXT.messages.length + 1, "original messages preserved");
 
 		const second = (await mock.emit("context", CONTEXT, cwd))[0] as ContextResult;
@@ -106,14 +111,16 @@ describe("Extension chain integration (mock harness)", () => {
 		assert.match(injectedText(results) ?? "", /EchoesVault|not inside a Git repository/);
 	});
 
-	it("respects gitContext opt-out", async () => {
+	it("respects gitContext opt-out while still restoring cross-session memory", async () => {
 		const cwd = await vaultDir();
 		await mkdir(path.join(cwd, ".pi"), { recursive: true });
 		await writeFile(path.join(cwd, ".pi", "echoes-config.json"), JSON.stringify({ gitContext: false }));
 		const mock = createMockPi();
 		echoesExtension(mock.api as never);
-		const results = await mock.emit("context", CONTEXT, cwd);
-		assert.equal(results[0], undefined);
+		const result = (await mock.emit("context", CONTEXT, cwd))[0] as ContextResult;
+		const text = injectedText(result) ?? "";
+		assert.match(text, /EchoesVault cross-session context/);
+		assert.doesNotMatch(text, /EchoesVault local Git snapshot|not inside a Git repository/);
 	});
 
 	it("respects automaticActions opt-out", async () => {
