@@ -4,9 +4,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it, after } from "node:test";
 import { startBackgroundRecovery } from "../src/recovery.ts";
+import { readRecoveryLock } from "../src/recovery-lock.ts";
+import type { GitSnapshot } from "../src/git-context.ts";
 import {
 	activateVault,
 	appendDailyLog,
+	bestEffortPersistGitSnapshot,
 	bootstrapVault,
 	claimPendingRecovery,
 	commitMemory,
@@ -15,6 +18,7 @@ import {
 	hasExistingEchoesPresence,
 	hasExistingVault,
 	needsAutomaticEnd,
+	persistGitSnapshot,
 	readState,
 	recordEndPendingOnQuit,
 	releasePendingRecovery,
@@ -361,7 +365,7 @@ describe("vault domain", () => {
 		);
 		const st = await readState(cwd);
 		assert.equal(st.version, STATE_VERSION);
-		assert.equal(st.pluginVersion, "0.3.3");
+		assert.equal(st.pluginVersion, "0.4.0");
 		assert.equal(st.initialized, false);
 		assert.equal(st.session.started, false);
 		assert.equal(st.session.saved, false);
@@ -530,5 +534,107 @@ describe("vault domain", () => {
 		await commitMemory(cwd, { dailySummary: "Saved before quit." });
 		assert.equal(await recordEndPendingOnQuit(cwd), false, "already saved");
 		assert.equal((await readState(cwd)).session.endPending, false);
+	});
+
+	function minimalSnapshot(head: string): GitSnapshot {
+		return {
+			repoRoot: "/repo",
+			gitDir: "/repo/.git",
+			commonDir: "/repo/.git",
+			branch: "main",
+			head,
+			headSubject: "subject",
+			upstream: null,
+			upstreamHead: null,
+			ahead: 0,
+			behind: 0,
+			staged: 0,
+			unstaged: 0,
+			untracked: 0,
+			conflicted: 0,
+			paths: [],
+			operation: null,
+			fingerprint: head,
+		};
+	}
+
+	it("persistGitSnapshot stores a baseline without disturbing lifecycle flags", async () => {
+		const cwd = await tempCwd();
+		await activateVault(cwd);
+		await startSession(cwd);
+		const st = await persistGitSnapshot(cwd, minimalSnapshot("abc123"));
+		assert.equal(st.gitSnapshot?.head, "abc123");
+		assert.equal(st.session.started, true, "interactive lifecycle must be untouched");
+		assert.equal(st.session.saved, false);
+	});
+
+	it("fires onSuccess once after a successful background recovery", async () => {
+		const cwd = await tempCwd();
+		await activateVault(cwd);
+		await startSession(cwd);
+		const transcript = path.join(cwd, "interrupted.jsonl");
+		await writeFile(transcript, '{"type":"message"}\n');
+		await recordEndPendingOnQuit(cwd, transcript);
+
+		let success = 0;
+		await startBackgroundRecovery(cwd, {
+			run: async () => {},
+			onSuccess: () => {
+				success++;
+			},
+		});
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		assert.equal(success, 1, "onSuccess must fire exactly once");
+	});
+
+	it("bestEffortPersistGitSnapshot never throws even when state writes fail", async () => {
+		const cwd = await tempCwd();
+		await activateVault(cwd);
+		// Sabotage the state path so writeState fails deterministically.
+		await rm(statePath(cwd), { force: true });
+		await mkdir(statePath(cwd), { recursive: true });
+		const ok = await bestEffortPersistGitSnapshot(cwd);
+		assert.equal(ok, false, "reports failure without throwing");
+	});
+
+	it("a throwing onSuccess must not flip a successful recovery into failure", async () => {
+		const cwd = await tempCwd();
+		await activateVault(cwd);
+		await startSession(cwd);
+		const transcript = path.join(cwd, "interrupted.jsonl");
+		await writeFile(transcript, '{"type":"message"}\n');
+		await recordEndPendingOnQuit(cwd, transcript);
+
+		let failures = 0;
+		await startBackgroundRecovery(cwd, {
+			run: async () => {},
+			onSuccess: () => {
+				throw new Error("notify exploded");
+			},
+			onFailure: () => {
+				failures++;
+			},
+		});
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		assert.equal(failures, 0, "callback failure must not trigger onFailure");
+		assert.equal(await readRecoveryLock(cwd), null, "lock must still be released");
+	});
+
+	it("records the interrupted session identity in the recovery lock", async () => {
+		const cwd = await tempCwd();
+		await activateVault(cwd);
+		await startSession(cwd);
+		const transcript = path.join(cwd, "interrupted.jsonl");
+		await writeFile(transcript, '{"type":"message"}\n');
+		await recordEndPendingOnQuit(cwd, transcript);
+
+		let observed: string | null | undefined;
+		await startBackgroundRecovery(cwd, {
+			run: async () => {
+				observed = (await readRecoveryLock(cwd))?.sessionFile;
+			},
+		});
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		assert.equal(observed, path.resolve(transcript), "lock must carry the interrupted transcript path");
 	});
 });

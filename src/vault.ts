@@ -1,8 +1,8 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { GitSnapshot } from "./git-context.ts";
+import { captureGitSnapshot, type GitSnapshot } from "./git-context.ts";
 
-export const PACKAGE_VERSION = "0.3.3";
+export const PACKAGE_VERSION = "0.4.0";
 /** Persisted `.pi/echoes-state.json` schema version (v3 adds isolated recovery metadata). */
 export const STATE_VERSION = 3;
 export const STATE_RELATIVE = path.join(".pi", "echoes-state.json");
@@ -557,6 +557,37 @@ export async function releasePendingRecovery(cwd: string): Promise<void> {
 	});
 }
 
+/**
+ * Persist a Git baseline snapshot AFTER vault writes complete, without
+ * disturbing interactive session lifecycle flags, so the saved baseline
+ * reflects the commit's own writes.
+ */
+export async function persistGitSnapshot(
+	cwd: string,
+	snapshot: GitSnapshot | null,
+): Promise<EchoesState> {
+	return withVaultMutation(cwd, async () => {
+		const st = await readState(cwd);
+		st.gitSnapshot = snapshot;
+		await writeState(cwd, st);
+		return st;
+	});
+}
+
+/**
+ * Capture and persist a Git baseline as a best-effort side effect. The memory
+ * commit is authoritative; a baseline failure must never fail the commit tool
+ * or trigger a duplicate commit on retry. Returns false when it could not save.
+ */
+export async function bestEffortPersistGitSnapshot(cwd: string): Promise<boolean> {
+	try {
+		await persistGitSnapshot(cwd, await captureGitSnapshot(cwd));
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /** Reload-safe stats refresh that re-reads state under the mutation lock. */
 export async function refreshStatsOnReload(cwd: string): Promise<EchoesState | null> {
 	return withVaultMutation(cwd, async () => {
@@ -622,7 +653,7 @@ function indexCoversSlug(indexText: string, appends: string[], slug: string): bo
 export async function commitMemory(
 	cwd: string,
 	args: CommitArgs,
-	options: { recovery?: boolean; gitSnapshot?: GitSnapshot | null } = {},
+	options: { recovery?: boolean } = {},
 ): Promise<string> {
 	return withVaultMutation(cwd, async () => {
 		const paths = await bootstrapVault(cwd);
@@ -685,7 +716,6 @@ export async function commitMemory(
 		st.session.pendingSessionFile = null;
 		st.session.recoveryClaimedAt = null;
 		st.session.lastSave = new Date().toISOString();
-		if (options.gitSnapshot !== undefined) st.gitSnapshot = options.gitSnapshot;
 		st.stats = await collectStats(paths);
 		await writeState(cwd, st);
 

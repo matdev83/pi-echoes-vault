@@ -6,8 +6,9 @@ import {
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { captureGitSnapshot } from "./git-context.ts";
+import { acquireRecoveryLock } from "./recovery-lock.ts";
 import {
+	bestEffortPersistGitSnapshot,
 	claimPendingRecovery,
 	commitMemory,
 	readState,
@@ -19,6 +20,10 @@ export type RecoveryResult = "not-pending" | "started";
 
 export type RecoveryDeps = {
 	run?: (cwd: string, transcript: string) => Promise<void>;
+	/** Fired once after a successful background recovery. UI-only. */
+	onSuccess?: (cwd: string) => void;
+	/** Fired once after a failed background recovery. UI-only. */
+	onFailure?: (cwd: string, error: unknown) => void;
 };
 
 function textResult(text: string) {
@@ -48,8 +53,9 @@ async function runSdkRecovery(cwd: string, transcript: string): Promise<void> {
 			),
 		}),
 		async execute(_id, params) {
-			const gitSnapshot = await captureGitSnapshot(cwd);
-			return textResult(await commitMemory(cwd, params as CommitArgs, { recovery: true, gitSnapshot }));
+			const result = await commitMemory(cwd, params as CommitArgs, { recovery: true });
+			await bestEffortPersistGitSnapshot(cwd);
+			return textResult(result);
 		},
 	};
 
@@ -88,12 +94,51 @@ export async function startBackgroundRecovery(
 	cwd: string,
 	deps: RecoveryDeps = {},
 ): Promise<RecoveryResult> {
-	const sessionFile = await claimPendingRecovery(cwd);
-	if (sessionFile === null) return "not-pending";
-	const transcript = await readTranscript(sessionFile);
-	const run = deps.run ?? runSdkRecovery;
-	void run(cwd, transcript).catch(async () => {
-		await releasePendingRecovery(cwd).catch(() => {});
-	});
-	return "started";
+	// Peek the interrupted transcript identity (without claiming) so the lock
+	// carries useful diagnostics about which session is being recovered.
+	const peeked = await peekPendingSessionFile(cwd);
+	const lock = await acquireRecoveryLock(cwd, { sessionFile: peeked });
+	if (!lock.acquired) return "not-pending";
+
+	let claimed = false;
+	try {
+		const sessionFile = await claimPendingRecovery(cwd);
+		if (sessionFile === null) {
+			await lock.release();
+			return "not-pending";
+		}
+		claimed = true;
+		const transcript = await readTranscript(sessionFile);
+		const run = deps.run ?? runSdkRecovery;
+		void (async () => {
+			const failure = await run(cwd, transcript).then(
+				() => null,
+				(error: unknown) => ({ error }),
+			);
+			if (failure) await releasePendingRecovery(cwd).catch(() => {});
+			await lock.release().catch(() => {});
+			// Callbacks are UI-only; their failure must never change recovery outcome.
+			try {
+				if (failure) deps.onFailure?.(cwd, failure.error);
+				else deps.onSuccess?.(cwd);
+			} catch {
+				/* notification failures are non-fatal */
+			}
+		})();
+		return "started";
+	} catch (error) {
+		if (claimed) await releasePendingRecovery(cwd).catch(() => {});
+		await lock.release().catch(() => {});
+		throw error;
+	}
+}
+
+/** Read the pending interrupted transcript path without claiming recovery. */
+async function peekPendingSessionFile(cwd: string): Promise<string | null> {
+	try {
+		const st = await readState(cwd);
+		return st.session.endPending ? st.session.pendingSessionFile : null;
+	} catch {
+		return null;
+	}
 }

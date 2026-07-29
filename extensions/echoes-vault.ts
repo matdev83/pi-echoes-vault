@@ -4,6 +4,7 @@
  */
 
 import type {
+	ContextEvent,
 	ExtensionAPI,
 	ExtensionCommandContext,
 	ExtensionContext,
@@ -24,6 +25,7 @@ import {
 	formatStatusReport,
 	getDateStr,
 	hasExistingVault,
+	bestEffortPersistGitSnapshot,
 	markEndPromptSent,
 	markStartPromptSent,
 	needsAutomaticEnd,
@@ -39,7 +41,11 @@ import {
 	clearStartPromptSent,
 } from "../src/vault.ts";
 import { startBackgroundRecovery } from "../src/recovery.ts";
-import { captureGitSnapshot, formatGitContext } from "../src/git-context.ts";
+import { readResolvedEchoesConfig } from "../src/config.ts";
+import { captureGitSnapshot, computeGitDelta, formatGitContext } from "../src/git-context.ts";
+import { buildDoctorReport, formatDoctorReport } from "../src/diagnostics.ts";
+import { fetchBranchPr, formatPrContext, type PrContextResult } from "../src/pr-context.ts";
+import { detectSubagentSession, isNonInteractiveContext } from "../src/subagent.ts";
 
 type DeliverCtx = {
 	hasUI: boolean;
@@ -194,6 +200,13 @@ function endTriggerText(trigger: PromptTrigger): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	// Subagent/headless Pi sessions get no EchoesVault automation at all: injected
+	// prompts and hidden context break non-interactive agent loops. Detection is
+	// static (env markers + CLI flags), so nothing is registered in such sessions;
+	// handlers additionally re-check the bound runtime mode for SDK embeddings
+	// where argv inspection cannot see the host's mode.
+	if (detectSubagentSession().isSubagent) return;
+
 	// A resumed session can retain its original cwd even when Pi was launched elsewhere.
 	// Recovery must never cross that launch-directory boundary.
 	const launchCwd = cwdKey(process.cwd());
@@ -217,30 +230,18 @@ export default function (pi: ExtensionAPI) {
 	const endPhase = new Map<string, "queued" | "running">();
 	const gitContextInjected = new Set<string>();
 
-	type EchoesConfig = { automaticActions?: boolean; gitContext?: boolean };
-
-	async function readConfig(cwd: string): Promise<EchoesConfig> {
-		try {
-			const raw = await readTextOr(path.join(cwd, ".pi", "echoes-config.json"), "{}");
-			return JSON.parse(raw) as EchoesConfig;
-		} catch {
-			return {};
-		}
-	}
+	type PrStateEntry = { status: "fetching" | "done"; result?: PrContextResult; injected: boolean };
+	const prState = new Map<string, PrStateEntry>();
 
 	async function automaticActionsEnabled(cwd: string): Promise<boolean> {
-		return (await readConfig(cwd)).automaticActions !== false;
-	}
-
-	async function gitContextEnabled(cwd: string): Promise<boolean> {
-		const config = await readConfig(cwd);
-		return config.automaticActions !== false && config.gitContext !== false;
+		return (await readResolvedEchoesConfig(cwd)).automaticActions;
 	}
 
 	async function runEchoesStart(
 		ctx: DeliverCtx & { cwd: string },
 		trigger: PromptTrigger,
 	): Promise<boolean> {
+		if (isNonInteractiveContext(ctx)) return false;
 		if (!(await hasExistingVault(ctx.cwd))) {
 			if (trigger === "manual") {
 				notify(ctx, "No EchoesVault found. Run /echoes-init first.", "warning");
@@ -288,6 +289,7 @@ export default function (pi: ExtensionAPI) {
 		ctx: DeliverCtx & { cwd: string },
 		trigger: PromptTrigger,
 	): Promise<{ sent: boolean; inFlight: boolean }> {
+		if (isNonInteractiveContext(ctx)) return { sent: false, inFlight: false };
 		if (!(await hasExistingVault(ctx.cwd))) {
 			if (trigger === "manual") {
 				notify(ctx, "No EchoesVault found. Run /echoes-init first.", "warning");
@@ -332,6 +334,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	async function handlePreClose(ctx: ExtensionContext): Promise<{ cancel: true } | undefined> {
+		if (isNonInteractiveContext(ctx)) return undefined;
 		if (!(await automaticActionsEnabled(ctx.cwd)) || !(await needsAutomaticEnd(ctx.cwd))) return undefined;
 
 		const st = await readState(ctx.cwd);
@@ -348,6 +351,7 @@ export default function (pi: ExtensionAPI) {
 		ctx: ExtensionContext,
 	): Promise<{ cancel: true } | undefined> {
 		try {
+			if (isNonInteractiveContext(ctx)) return undefined;
 			if (!(await hasExistingVault(ctx.cwd))) return undefined;
 			const needs = await needsAutomaticEnd(ctx.cwd).catch(() => true);
 			if (!needs) return undefined;
@@ -399,8 +403,9 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const gitSnapshot = await captureGitSnapshot(ctx.cwd);
-			const result = await commitMemory(ctx.cwd, params, { gitSnapshot });
+			const result = await commitMemory(ctx.cwd, params);
+			// Baseline persistence is auxiliary; it must never fail an authoritative commit.
+			await bestEffortPersistGitSnapshot(ctx.cwd);
 			endPhase.delete(cwdKey(ctx.cwd));
 			return textResult(result);
 		},
@@ -475,6 +480,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("echoes-init", {
 		description: "Initialize EchoesVault — create directory structure and activate",
 		handler: async (_args, ctx: ExtensionCommandContext) => {
+			if (isNonInteractiveContext(ctx)) return;
 			await activateVault(ctx.cwd);
 			const paths = resolveVaultPaths(ctx.cwd);
 			const index = await readTextOr(paths.index, "(index missing)");
@@ -500,6 +506,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("echoes-status", {
 		description: "Report EchoesVault health and statistics",
 		handler: async (_args, ctx: ExtensionCommandContext) => {
+			if (isNonInteractiveContext(ctx)) return;
 			if (!(await hasExistingVault(ctx.cwd))) {
 				notify(ctx, "No EchoesVault found. Run /echoes-init first.", "warning");
 				return;
@@ -528,8 +535,23 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerCommand("echoes-doctor", {
+		description: "Diagnose EchoesVault activation, config, lifecycle, recovery, and Git state",
+		handler: async (_args, ctx: ExtensionCommandContext) => {
+			if (isNonInteractiveContext(ctx)) return;
+			const report = await buildDoctorReport(ctx.cwd);
+			notify(
+				ctx,
+				report.healthy ? "EchoesVault doctor: healthy" : "EchoesVault doctor: issues found",
+				report.healthy ? "info" : "warning",
+			);
+			deliverPrompt(pi, ctx, formatDoctorReport(report));
+		},
+	});
+
 	pi.on("session_start", async (event: SessionStartEvent, ctx) => {
 		try {
+			if (isNonInteractiveContext(ctx)) return;
 			if (!(await hasExistingVault(ctx.cwd))) return;
 
 			if (event.reason === "reload") {
@@ -541,11 +563,24 @@ export default function (pi: ExtensionAPI) {
 			if (!(await automaticActionsEnabled(ctx.cwd))) return;
 
 			// Automatic starts are lifecycle-only. Interactive restoration is explicit via /echoes-start.
+			// A logical session replacement gets a fresh once-per-session Git context injection.
 			startDeliveredThisRuntime.delete(cwdKey(ctx.cwd));
+			gitContextInjected.delete(cwdKey(ctx.cwd));
+			prState.delete(cwdKey(ctx.cwd));
 			if (cwdKey(ctx.cwd) === launchCwd) {
-				const recovery = await startBackgroundRecovery(ctx.cwd);
+				const project = ctx.cwd;
+				const recovery = await startBackgroundRecovery(ctx.cwd, {
+					onSuccess: () =>
+						notify(ctx, `Updated EchoesVault contents for "${project}" in the background.`, "info"),
+					onFailure: () =>
+						notify(
+							ctx,
+							`Could not update EchoesVault contents for "${project}"; it will retry later.`,
+							"warning",
+						),
+				});
 				if (recovery === "started") {
-					notify(ctx, `Started EchoesVault updates for "${ctx.cwd}" in the background.`, "info");
+					notify(ctx, `Started EchoesVault updates for "${project}" in the background.`, "info");
 				}
 			}
 			await startSession(ctx.cwd);
@@ -554,20 +589,77 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("before_agent_start", async (event, ctx) => {
+	/**
+	 * Once-per-logical-session Git/PR context injection.
+	 *
+	 * Uses the per-LLM-call `context` event and appends a genuine `role: "user"`
+	 * message. The previous `before_agent_start` custom message became
+	 * `role: "custom"` in session state and JSONL files, which strict inference
+	 * providers and downstream session replays reject. The appended message only
+	 * exists in the outgoing request: it is not persisted and not displayed, so
+	 * nothing non-standard ever reaches providers, transcripts, or the UI.
+	 */
+	pi.on("context", async (event: ContextEvent, ctx) => {
 		try {
+			if (isNonInteractiveContext(ctx)) return;
 			const key = cwdKey(ctx.cwd);
-			if (gitContextInjected.has(key)) return;
-			if (!(await hasExistingVault(ctx.cwd)) || !(await gitContextEnabled(ctx.cwd))) return;
-			gitContextInjected.add(key);
-			const saved = (await readState(ctx.cwd)).gitSnapshot;
-			const current = await captureGitSnapshot(ctx.cwd);
+			if (!(await hasExistingVault(ctx.cwd))) return;
+			const config = await readResolvedEchoesConfig(ctx.cwd);
+			if (!config.automaticActions) return;
+
+			// Kick off a non-blocking PR fetch once per logical session when enabled.
+			if (config.prContext) {
+				const existing = prState.get(key);
+				if (!existing) {
+					prState.set(key, { status: "fetching", injected: false });
+					void fetchBranchPr(ctx.cwd)
+						.then((result) => {
+							prState.set(key, {
+								status: "done",
+								result,
+								injected: prState.get(key)?.injected ?? false,
+							});
+						})
+						.catch(() => {
+							prState.set(key, {
+								status: "done",
+								result: { status: "error" },
+								injected: prState.get(key)?.injected ?? false,
+							});
+						});
+				}
+			}
+
+			const parts: string[] = [];
+
+			if (config.gitContext && !gitContextInjected.has(key)) {
+				gitContextInjected.add(key);
+				const saved = (await readState(ctx.cwd)).gitSnapshot;
+				const current = await captureGitSnapshot(ctx.cwd);
+				const delta = current
+					? await computeGitDelta(ctx.cwd, current, saved).catch(() => undefined)
+					: undefined;
+				parts.push(formatGitContext(current, saved, delta));
+			}
+
+			if (config.prContext) {
+				const st = prState.get(key);
+				if (st?.status === "done" && !st.injected && st.result?.status === "ok" && st.result.info) {
+					st.injected = true;
+					parts.push(formatPrContext(st.result.info));
+				}
+			}
+
+			if (parts.length === 0) return;
 			return {
-				message: {
-					customType: "echoes-git-context",
-					content: formatGitContext(current, saved),
-					display: false,
-				},
+				messages: [
+					...event.messages,
+					{
+						role: "user" as const,
+						content: [{ type: "text" as const, text: parts.join("\n\n") }],
+						timestamp: Date.now(),
+					},
+				],
 			};
 		} catch {
 			return;
@@ -593,6 +685,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", async (event: SessionShutdownEvent, ctx) => {
 		try {
 			// Never send a model prompt here — teardown aborts any queued turn.
+			if (isNonInteractiveContext(ctx)) return;
 			if (event.reason !== "quit" || !(await automaticActionsEnabled(ctx.cwd))) return;
 			await recordEndPendingOnQuit(ctx.cwd, ctx.sessionManager.getSessionFile());
 		} catch {
@@ -602,6 +695,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("agent_start", async (_event, ctx) => {
 		try {
+			if (isNonInteractiveContext(ctx)) return;
 			const key = cwdKey(ctx.cwd);
 			if (endPhase.get(key) === "queued") {
 				endPhase.set(key, "running");
@@ -619,6 +713,7 @@ export default function (pi: ExtensionAPI) {
 	 */
 	pi.on("agent_settled", async (_event, ctx) => {
 		try {
+			if (isNonInteractiveContext(ctx)) return;
 			const key = cwdKey(ctx.cwd);
 			if (endPhase.get(key) !== "running") return;
 			endPhase.delete(key);

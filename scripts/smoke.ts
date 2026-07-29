@@ -34,6 +34,7 @@ type CommandDef = {
 
 type MockCommandContext = {
 	cwd: string;
+	mode: string;
 	hasUI: boolean;
 	sessionManager: { getSessionFile: () => string | undefined };
 	getSystemPrompt: () => string;
@@ -76,6 +77,7 @@ function createMockPi() {
 	function makeCtx(cwd: string): MockCommandContext {
 		return {
 			cwd,
+			mode: "tui",
 			hasUI: true,
 			sessionManager: { getSessionFile: () => undefined },
 			getSystemPrompt: () => "system",
@@ -152,10 +154,11 @@ async function main() {
 	]);
 	assert.deepEqual(
 		[...mock.commands.keys()].sort(),
-		["echoes-end", "echoes-init", "echoes-start", "echoes-status"],
+		["echoes-doctor", "echoes-end", "echoes-init", "echoes-start", "echoes-status"],
 	);
 	assert.equal((mock.handlers.get("session_start") ?? []).length, 1);
-	assert.equal((mock.handlers.get("before_agent_start") ?? []).length, 1);
+	assert.equal((mock.handlers.get("before_agent_start") ?? []).length, 0);
+	assert.equal((mock.handlers.get("context") ?? []).length, 1);
 	assert.equal((mock.handlers.get("session_before_switch") ?? []).length, 1);
 	assert.equal((mock.handlers.get("session_before_fork") ?? []).length, 1);
 	assert.equal((mock.handlers.get("session_shutdown") ?? []).length, 1);
@@ -182,15 +185,23 @@ async function main() {
 		assert.equal(initState.session.started, false);
 		assert.equal(initState.session.startPromptSent, false);
 
-		const gitContextResults = await mock.emit(
-			"before_agent_start",
-			{ type: "before_agent_start", prompt: "test", systemPrompt: "system" },
-			cwd,
+		const contextEvent = {
+			type: "context",
+			messages: [{ role: "user", content: [{ type: "text", text: "test" }], timestamp: 1 }],
+		};
+		const gitContextResults = await mock.emit("context", contextEvent, cwd);
+		const gitContext = gitContextResults[0] as
+			| { messages?: Array<{ role?: string; content?: Array<{ text?: string }> }> }
+			| undefined;
+		const appended = gitContext?.messages?.at(-1);
+		assert.equal(appended?.role, "user", "injected context must use the standard user role");
+		assert.equal(gitContext?.messages?.length, 2, "original message preserved plus injected context");
+		assert.match(
+			appended?.content?.map((c) => c.text ?? "").join("\n") ?? "",
+			/Git snapshot|not inside a Git repository/,
 		);
-		const gitContext = gitContextResults[0] as { message?: { customType?: string; content?: string; display?: boolean } };
-		assert.equal(gitContext.message?.customType, "echoes-git-context");
-		assert.equal(gitContext.message?.display, false);
-		assert.match(gitContext.message?.content ?? "", /Git snapshot|not inside a Git repository/);
+		const secondContext = await mock.emit("context", contextEvent, cwd);
+		assert.equal(secondContext[0], undefined, "git context injects only once per logical session");
 
 		mock.messages.length = 0;
 		mock.notifies.length = 0;
@@ -502,6 +513,39 @@ async function main() {
 		await mock.emit("session_start", { type: "session_start", reason: "startup" }, stateOnly);
 		assert.equal(mock.messages.length, 0);
 		assert.equal(await hasExistingVault(stateOnly), false);
+
+		// Subagent session (nested-env marker at load): extension registers nothing at all
+		const subagentCwd = await mkdtemp(path.join(tmpdir(), "echoes-sub-"));
+		dirsToClean.push(subagentCwd);
+		await activateVault(subagentCwd);
+		const mockSub = createMockPi();
+		process.env.PI_SESSION_ID = "echoes-smoke-subagent";
+		try {
+			mod.default(mockSub.api);
+		} finally {
+			delete process.env.PI_SESSION_ID;
+		}
+		assert.equal(mockSub.tools.length, 0, "subagent session registers no tools");
+		assert.equal(mockSub.commands.size, 0, "subagent session registers no commands");
+		assert.equal(
+			[...mockSub.handlers.values()].flat().length,
+			0,
+			"subagent session registers no event handlers",
+		);
+
+		// Headless runtime mode guard: handlers stay silent even when the extension loaded
+		const mockHeadless = createMockPi();
+		mod.default(mockHeadless.api);
+		const headlessCtx = { ...mockHeadless.makeCtx(cwd), mode: "json", hasUI: false };
+		const headlessContextResults = [];
+		for (const h of mockHeadless.handlers.get("context") ?? []) {
+			headlessContextResults.push(await h({ type: "context", messages: [] }, headlessCtx));
+		}
+		assert.deepEqual(headlessContextResults, [undefined], "context handler silent in json mode");
+		for (const h of mockHeadless.handlers.get("session_before_switch") ?? []) {
+			const r = await h({ type: "session_before_switch", reason: "new" }, headlessCtx);
+			assert.equal(r, undefined, "pre-close save flow silent in json mode");
+		}
 
 		console.log("smoke: ok");
 	} finally {

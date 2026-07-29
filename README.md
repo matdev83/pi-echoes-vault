@@ -102,6 +102,7 @@ Pushing a `v*` tag that matches `package.json` `version` runs `.github/workflows
 | `/echoes-start` | Mark session started; inject index + last 3 daily logs via `pi.sendUserMessage` |
 | `/echoes-end` | Ask the agent to call `commit_memory_to_echoes_vault` |
 | `/echoes-status` | Inject vault metrics + index/today log for a short health dashboard |
+| `/echoes-doctor` | Bounded diagnostics: vault, config, lifecycle, recovery lock/transcript, and Git baseline |
 
 ### Automatic session lifecycle
 
@@ -118,9 +119,13 @@ When the extension is loaded and an `EchoesVault/` directory exists in the proje
 
 Successful `commit_memory_to_echoes_vault` is the authoritative “already saved” signal: it clears `endPending`, marks `saved`, and suppresses automatic end prompts.
 
-Automatic session starts never inject EchoesVault messages or trigger an interactive model turn. On the first user-driven turn, projects containing `EchoesVault/` add a bounded local Git snapshot to the system context (repository/worktree, branch/HEAD, cached upstream ahead/behind, operation state, and staged/unstaged/untracked/conflicted counts). The snapshot is compared with the latest successful vault update and collapses to one line when unchanged. It never fetches or uses the network. Configure opt-outs per project in `.pi/echoes-config.json`: `{ "gitContext": false }` disables only Git context; `{ "automaticActions": false }` disables all automatic lifecycle, recovery, and Git-context behavior while preserving manual commands. Use `/echoes-start` when explicit interactive vault restoration is wanted; manual restoration is deduplicated within the current extension runtime. Interrupted-session recovery is narrower: only Pi launched in the same project folder may claim `endPending`. Recovery runs in a separate in-memory Pi SDK session with extension/context discovery disabled and only the EchoesVault commit tool enabled, so its transcript and instructions never enter the new interactive context. A persisted 30-minute lease prevents duplicate workers; failures release the claim for retry, while a successful commit clears `endPending` and the transcript reference.
+Automatic session starts never inject EchoesVault messages or trigger an interactive model turn. On the first user-driven turn of a logical session, projects containing `EchoesVault/` add a bounded local Git snapshot as hidden context (repository/worktree, branch/HEAD, cached upstream ahead/behind, operation state, and staged/unstaged/untracked/conflicted counts). The snapshot is appended to the outgoing request as a genuine `role: "user"` message via the per-turn `context` event — never as a custom/non-standard message role — so strict inference providers that accept only `user`/`system` roles do not reject it. The injected message exists only in that request: it is not persisted to the session file, not shown in the UI, and never appears in transcripts or event streams. Changes are split into **project** work and **EchoesVault-managed** files; both are always reported, and a worktree dirty only under `EchoesVault/` is never described as clean. When the state differs from the last successful vault update, a structured offline delta is added (branch change, HEAD movement classified as advanced/rewound/diverged with up to five recent commits, cached-upstream movement, and newly changed/resolved paths). The baseline is captured **after** each commit's own vault writes, so the extension's own files do not create false "changed" reports; when nothing changed, the snapshot collapses to one line. Git context never fetches or uses the network. A logical session replacement (`/new`, `/resume`, `/fork`) re-injects a fresh snapshot once; no automatic turn is ever sent. Use `/echoes-start` for explicit interactive vault restoration (deduplicated per runtime). See [Configuration](#configuration) for opt-outs.
 
-State read-modify-write for lifecycle and commit is serialized **in-process** per cwd (no cross-process lock).
+Interrupted-session recovery is narrower: only Pi launched in the same project folder may claim `endPending`. Recovery runs in a separate in-memory Pi SDK session with extension/context discovery disabled and only the EchoesVault commit tool enabled, so its transcript and instructions never enter the new interactive context. An atomic cross-process lock (`.pi/echoes-recovery.lock`) plus a persisted 30-minute lease guarantee a single worker per project; stale or dead-owner locks are reclaimed, failures release the claim for retry, and a successful commit clears `endPending` and the transcript reference. Calm, folder-specific UI notifications report start, success, and retry-later failure; they never enter model context.
+
+Optionally, current-branch pull-request context can be enabled with `prContext: true`. It is fetched asynchronously via `gh` (never blocking the first turn or running `git fetch`), cached for 10 minutes, injected as hidden context on a later turn, and degrades silently when `gh`, auth, network, or a GitHub remote is unavailable.
+
+State read-modify-write for lifecycle and commit is serialized **in-process** per cwd. Background recovery additionally uses an atomic **cross-process** lock (`.pi/echoes-recovery.lock`) with a stale lease so only one worker runs per project.
 
 Vault creation is **not** triggered merely by loading the extension. Use `/echoes-init` for a fresh project. State-only `.pi/echoes-state.json` without `EchoesVault/index.md` does not enable auto-start. Manual `/echoes-end` (and `/echoes-start` / `/echoes-status`) on a project without a real vault notify you to run `/echoes-init` and do not create one.
 
@@ -129,6 +134,44 @@ Manual `/echoes-start` / `/echoes-end` after the automatic prompts are no-ops fo
 If the agent is busy, prompts are queued with `deliverAs: "followUp"` and a brief `ctx.ui.notify` is shown when UI is available.
 
 On before-switch/fork handler errors while a save is still needed, the transition is **cancelled defensively** rather than allowing an unsaved exit.
+
+### Subagent and headless sessions
+
+EchoesVault targets interactive main sessions. Pi subagents run as separate headless Pi processes, and injected steering messages break their agent loops, so the extension **disables itself completely** in such sessions — no tools, no commands, no event handlers, no state writes:
+
+- **Load-time detection:** the extension registers nothing when it finds nested-session environment markers (`PI_SESSION_ID` / `PI_SESSION_FILE`, which Pi injects only into commands spawned by a parent session's bash tool) or non-interactive CLI flags (`--mode text|json|rpc`, `-p`, `--print`).
+- **Runtime guard:** every handler and command additionally no-ops when the bound extension mode is not `tui` (covers SDK embeddings and piped-stdin print fallbacks that argv inspection cannot see).
+
+A side effect: RPC-driven and print/JSON invocations never get vault automation, even when launched by hand. Run the interactive TUI in the project for full EchoesVault behavior.
+
+### Configuration
+
+All automatic behavior is opt-out per project via `.pi/echoes-config.json` (malformed JSON safely falls back to defaults and is reported by `/echoes-doctor`):
+
+```json
+{
+  "automaticActions": true,
+  "gitContext": true,
+  "prContext": false
+}
+```
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `automaticActions` | `true` | `false` disables **all** automatic lifecycle tracking, background recovery, Git context, and PR context. Manual commands still work. |
+| `gitContext` | `true` | `false` disables only the first-turn local Git snapshot. |
+| `prContext` | `false` | `true` opts in to asynchronous current-branch PR enrichment via `gh`. |
+
+Precedence: `automaticActions: false` overrides `gitContext` and `prContext`.
+
+### Verification recipes
+
+- **Project vs vault dirtiness:** dirty a source file and an `EchoesVault/` file, start a fresh session, and ask the agent to report the supplied Git snapshot without running tools; both categories appear, and a vault-only change is never called clean.
+- **Unchanged baseline:** run `/echoes-end`, exit, restart with no changes; the snapshot collapses to a single "matches the last vault update" line.
+- **Opt-outs:** set `gitContext: false` (or `automaticActions: false`) and confirm no snapshot is supplied; remove it to restore.
+- **Diagnostics:** run `/echoes-doctor` to inspect vault, config, lifecycle, recovery lock/transcript, and Git baseline state.
+- **Recovery concurrency:** two simultaneous Pi starts in one project produce exactly one background worker (`.pi/echoes-recovery.lock`).
+- **PR opt-in:** with `prContext: true` and `gh` authenticated, the current branch PR appears on a later turn; without `gh` it degrades silently (visible via `/echoes-doctor`).
 
 ### Tools (LLM-callable)
 
