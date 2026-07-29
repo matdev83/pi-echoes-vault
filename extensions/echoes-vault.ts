@@ -202,8 +202,8 @@ function endTriggerText(trigger: PromptTrigger): string {
 export default function (pi: ExtensionAPI) {
 	// Subagent/headless Pi sessions get no EchoesVault automation at all: injected
 	// prompts and hidden context break non-interactive agent loops. Detection is
-	// static (env markers + CLI flags), so nothing is registered in such sessions;
-	// handlers additionally re-check the bound runtime mode for SDK embeddings
+	// static (CLI flags), so nothing is registered in such sessions; handlers
+	// additionally re-check the bound runtime mode for SDK embeddings
 	// where argv inspection cannot see the host's mode.
 	if (detectSubagentSession().isSubagent) return;
 

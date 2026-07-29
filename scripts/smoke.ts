@@ -514,23 +514,24 @@ async function main() {
 		assert.equal(mock.messages.length, 0);
 		assert.equal(await hasExistingVault(stateOnly), false);
 
-		// Subagent session (nested-env marker at load): extension registers nothing at all
-		const subagentCwd = await mkdtemp(path.join(tmpdir(), "echoes-sub-"));
-		dirsToClean.push(subagentCwd);
-		await activateVault(subagentCwd);
-		const mockSub = createMockPi();
-		process.env.PI_SESSION_ID = "echoes-smoke-subagent";
+		// Session metadata is also present in interactive hosts and must not disable the extension.
+		const interactiveCwd = await mkdtemp(path.join(tmpdir(), "echoes-interactive-"));
+		dirsToClean.push(interactiveCwd);
+		await activateVault(interactiveCwd);
+		const mockInteractive = createMockPi();
+		const previousSessionId = process.env.PI_SESSION_ID;
+		process.env.PI_SESSION_ID = "echoes-smoke-interactive";
 		try {
-			mod.default(mockSub.api);
+			mod.default(mockInteractive.api);
 		} finally {
-			delete process.env.PI_SESSION_ID;
+			if (previousSessionId === undefined) delete process.env.PI_SESSION_ID;
+			else process.env.PI_SESSION_ID = previousSessionId;
 		}
-		assert.equal(mockSub.tools.length, 0, "subagent session registers no tools");
-		assert.equal(mockSub.commands.size, 0, "subagent session registers no commands");
-		assert.equal(
-			[...mockSub.handlers.values()].flat().length,
-			0,
-			"subagent session registers no event handlers",
+		assert.ok(mockInteractive.tools.length > 0, "interactive session registers tools");
+		assert.ok(mockInteractive.commands.size > 0, "interactive session registers commands");
+		assert.ok(
+			(mockInteractive.handlers.get("context")?.length ?? 0) > 0,
+			"interactive session registers context injection",
 		);
 
 		// Headless runtime mode guard: handlers stay silent even when the extension loaded

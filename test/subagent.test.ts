@@ -12,11 +12,11 @@ describe("detectSubagentSession", () => {
 		assert.deepEqual(detection.signals, []);
 	});
 
-	it("detects nested-session env markers inherited from a parent Pi bash tool", () => {
+	it("does not classify session metadata alone as a subagent", () => {
 		for (const name of ["PI_SESSION_ID", "PI_SESSION_FILE"] as const) {
 			const detection = detectSubagentSession({ [name]: "x" }, MAIN_ARGV);
-			assert.equal(detection.isSubagent, true, `${name} must mark a subagent session`);
-			assert.deepEqual(detection.signals, ["nested-session-env"]);
+			assert.equal(detection.isSubagent, false, `${name} is also present in interactive hosts`);
+			assert.deepEqual(detection.signals, []);
 		}
 	});
 
@@ -52,13 +52,13 @@ describe("detectSubagentSession", () => {
 		}
 	});
 
-	it("reports both signals when env and argv both indicate a subagent", () => {
+	it("uses headless argv even when session metadata is present", () => {
 		const detection = detectSubagentSession(
 			{ PI_SESSION_ID: "x" },
 			["node", "pi", "--mode", "json", "-p", "task"],
 		);
 		assert.equal(detection.isSubagent, true);
-		assert.deepEqual(detection.signals, ["nested-session-env", "headless-mode-flag"]);
+		assert.deepEqual(detection.signals, ["headless-mode-flag"]);
 	});
 });
 

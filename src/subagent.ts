@@ -9,18 +9,17 @@
  * completely when it detects such a session.
  *
  * Detection is two-layered:
- * - Load-time ({@link detectSubagentSession}): environment markers inherited
- *   from a parent Pi process and non-interactive CLI flags in argv.
+ * - Load-time ({@link detectSubagentSession}): non-interactive CLI flags in argv.
+ *   Session environment variables are deliberately ignored because current Pi
+ *   versions also expose them to interactive extension hosts.
  * - Runtime ({@link isNonInteractiveContext}): the bound extension mode, which
  *   also covers SDK embeddings and piped-stdin fallbacks where argv is clean.
  */
 
 /** Why a session was classified as a subagent/headless session. */
 export type SubagentSignal =
-	/** `PI_SESSION_ID`/`PI_SESSION_FILE` inherited from a parent Pi bash-tool spawn. */
-	| "nested-session-env"
 	/** Non-interactive CLI flags: `--mode text|json|rpc`, `-p`, `--print`. */
-	| "headless-mode-flag";
+	"headless-mode-flag";
 
 export interface SubagentDetection {
 	isSubagent: boolean;
@@ -29,13 +28,6 @@ export interface SubagentDetection {
 
 /** `--mode` values that never host an interactive main session. */
 const HEADLESS_MODE_VALUES = new Set(["text", "json", "rpc"]);
-
-/**
- * Pi injects these only into commands run by its LLM-callable bash tool.
- * A nested Pi process spawned that way inherits them; a directly launched
- * main Pi process never has them at startup.
- */
-const NESTED_SESSION_ENV_VARS = ["PI_SESSION_ID", "PI_SESSION_FILE"] as const;
 
 function hasHeadlessModeFlag(argv: readonly string[]): boolean {
 	// Skip the runtime executable and script path entries.
@@ -59,11 +51,10 @@ function hasHeadlessModeFlag(argv: readonly string[]): boolean {
 
 /** Static, process-level detection. Evaluated once when the extension loads. */
 export function detectSubagentSession(
-	env: NodeJS.ProcessEnv = process.env,
+	_env: NodeJS.ProcessEnv = process.env,
 	argv: readonly string[] = process.argv,
 ): SubagentDetection {
 	const signals: SubagentSignal[] = [];
-	if (NESTED_SESSION_ENV_VARS.some((name) => !!env[name])) signals.push("nested-session-env");
 	if (hasHeadlessModeFlag(argv)) signals.push("headless-mode-flag");
 	return { isSubagent: signals.length > 0, signals };
 }

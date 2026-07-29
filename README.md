@@ -139,7 +139,7 @@ On before-switch/fork handler errors while a save is still needed, the transitio
 
 EchoesVault targets interactive main sessions. Pi subagents run as separate headless Pi processes, and injected steering messages break their agent loops, so the extension **disables itself completely** in such sessions — no tools, no commands, no event handlers, no state writes:
 
-- **Load-time detection:** the extension registers nothing when it finds nested-session environment markers (`PI_SESSION_ID` / `PI_SESSION_FILE`, which Pi injects only into commands spawned by a parent session's bash tool) or non-interactive CLI flags (`--mode text|json|rpc`, `-p`, `--print`).
+- **Load-time detection:** the extension registers nothing for non-interactive CLI flags (`--mode text|json|rpc`, `-p`, `--print`). Session metadata (`PI_SESSION_ID` / `PI_SESSION_FILE`) is not used for classification because interactive extension hosts may expose it too.
 - **Runtime guard:** every handler and command additionally no-ops when the bound extension mode is not `tui` (covers SDK embeddings and piped-stdin print fallbacks that argv inspection cannot see).
 
 A side effect: RPC-driven and print/JSON invocations never get vault automation, even when launched by hand. Run the interactive TUI in the project for full EchoesVault behavior.

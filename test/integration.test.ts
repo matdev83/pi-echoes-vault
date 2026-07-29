@@ -158,22 +158,22 @@ describe("Extension chain integration (mock harness)", () => {
 });
 
 describe("Subagent session handling", () => {
-	it("registers nothing when nested-session env markers are present at load", async () => {
+	it("keeps interactive context injection enabled when session metadata is present", async () => {
 		const cwd = await vaultDir();
 		const mock = createMockPi();
-		process.env.PI_SESSION_ID = "echoes-test-subagent";
+		const previous = process.env.PI_SESSION_ID;
+		process.env.PI_SESSION_ID = "echoes-test-interactive";
 		try {
 			echoesExtension(mock.api as never);
 		} finally {
-			delete process.env.PI_SESSION_ID;
+			if (previous === undefined) delete process.env.PI_SESSION_ID;
+			else process.env.PI_SESSION_ID = previous;
 		}
-		assert.deepEqual(mock.tools, [], "no tools in a subagent session");
-		assert.deepEqual(mock.commands, [], "no commands in a subagent session");
-		assert.equal([...mock.handlers.values()].flat().length, 0, "no event handlers in a subagent session");
+		assert.ok(mock.tools.length > 0, "interactive tools remain registered");
+		assert.ok(mock.commands.length > 0, "interactive commands remain registered");
 
-		const results = await mock.emit("context", CONTEXT, cwd);
-		assert.equal(results.length, 0, "nothing to inject with");
-		assert.equal(mock.sent.length, 0);
+		const result = (await mock.emit("context", CONTEXT, cwd))[0] as ContextResult;
+		assert.match(injectedText(result) ?? "", /EchoesVault|not inside a Git repository/);
 	});
 
 	it("injects nothing at runtime when the bound mode is headless", async () => {
