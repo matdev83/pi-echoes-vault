@@ -1,0 +1,2 @@
+# Normalize text files so Git never treats CRLF noise as a content change.
+* text=auto eol=lf
